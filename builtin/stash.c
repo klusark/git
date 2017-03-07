@@ -12,6 +12,7 @@
 #include "revision.h"
 #include "commit.h"
 #include "diffcore.h"
+#include "merge-recursive.h"
 
 static const char * const git_stash_helper_usage[] = {
 	N_("git stash--helper [--no-changes]"),
@@ -277,6 +278,41 @@ static int do_clear_stash()
 	return 0;
 }
 
+static int reset_tree(unsigned char i_tree[20], int update)
+{
+    struct unpack_trees_options opts;
+    int nr_trees = 1;
+    struct tree_desc t[MAX_UNPACK_TREES];
+    struct tree *tree;
+
+    refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+    hold_locked_index(&lock_file, LOCK_DIE_ON_ERROR);
+
+    memset(&opts, 0, sizeof(opts));
+
+    tree = parse_tree_indirect(i_tree);
+    parse_tree(tree);
+    init_tree_desc(t, tree->buffer, tree->size);
+
+    opts.head_idx = 1;
+    opts.src_index = &the_index;
+    opts.dst_index = &the_index;
+    opts.merge = 1;
+    opts.reset = 1;
+    opts.update = update;
+    opts.fn = oneway_merge;
+
+
+    if (unpack_trees(nr_trees, t, &opts))
+        return -1;
+
+    prime_cache_tree(&the_index, tree);
+
+    if (write_locked_index(&the_index, &lock_file, COMMIT_LOCK)) {
+        return error(_("unable to write new index file"));
+    }
+}
+
 static int do_push_stash(const char *prefix, const char *message, int keep_index)
 {
 	int result;
@@ -311,37 +347,7 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 	}
 
 	if (keep_index) {
-		struct unpack_trees_options opts;
-		int nr_trees = 1;
-		struct tree_desc t[MAX_UNPACK_TREES];
-		struct tree *tree;
-
-		refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
-		hold_locked_index(&lock_file, LOCK_DIE_ON_ERROR);
-
-		memset(&opts, 0, sizeof(opts));
-
-		tree = parse_tree_indirect(info.i_tree);
-		parse_tree(tree);
-		init_tree_desc(t, tree->buffer, tree->size);
-
-		opts.head_idx = 1;
-		opts.src_index = &the_index;
-		opts.dst_index = &the_index;
-		opts.merge = 1;
-		opts.reset = 1;
-		opts.update = 1;
-		opts.fn = oneway_merge;
-
-
-		if (unpack_trees(nr_trees, t, &opts))
-			return -1;
-
-		prime_cache_tree(&the_index, tree);
-
-		if (write_locked_index(&the_index, &lock_file, COMMIT_LOCK)) {
-			return error(_("unable to write new index file"));
-		}
+        reset_tree(info.i_tree, 1);
 	}
 
 	return 0;
@@ -394,20 +400,91 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 
 static int do_apply_stash(const char *prefix, const char *commit)
 {
+	unsigned char w_commit[20];
+	unsigned char b_commit[20];
+	unsigned char i_commit[20];
+	unsigned char w_tree[20];
+	unsigned char b_tree[20];
+	unsigned char i_tree[20];
 	unsigned char c_tree[20];
+	struct strbuf w_commit_rev = STRBUF_INIT;
+	struct strbuf b_commit_rev = STRBUF_INIT;
+	struct strbuf i_commit_rev = STRBUF_INIT;
+	struct strbuf w_tree_rev = STRBUF_INIT;
+	struct strbuf b_tree_rev = STRBUF_INIT;
+	struct strbuf i_tree_rev = STRBUF_INIT;
+	struct object_id h1, h2;
+	struct merge_options o;
+
 	int ret;
+	struct object_context unused;
+
+    const char *REV = commit;
+    if (commit == NULL) {
+        REV = "refs/stash@{0}";
+    }
+
+	strbuf_addf(&w_commit_rev, "%s", REV);
+	strbuf_addf(&b_commit_rev, "%s^1", REV);
+	strbuf_addf(&i_commit_rev, "%s^2", REV);
+	strbuf_addf(&w_tree_rev, "%s:", REV);
+	strbuf_addf(&b_tree_rev, "%s^1:", REV);
+	strbuf_addf(&i_tree_rev, "%s^2:", REV);
+
+
+    ret = (
+        get_sha1_with_context(w_commit_rev.buf, 0, w_commit, &unused) == 0 &&
+        get_sha1_with_context(b_commit_rev.buf, 0, b_commit, &unused) == 0 &&
+        get_sha1_with_context(i_commit_rev.buf, 0, i_commit, &unused) == 0 &&
+        get_sha1_with_context(w_tree_rev.buf, 0, w_tree, &unused) == 0 &&
+        get_sha1_with_context(b_tree_rev.buf, 0, b_tree, &unused) == 0 &&
+        get_sha1_with_context(i_tree_rev.buf, 0, i_tree, &unused) == 0);
+
+    if (!ret)
+        printf("invalid");
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 
 	ret = write_cache_as_tree(c_tree, 0, prefix);
 
-	return 1;
+	init_merge_options(&o);
+
+	o.branch1 = sha1_to_hex(c_tree);
+	o.branch2 = sha1_to_hex(w_tree);
+
+	if (get_oid(o.branch1, &h1))
+		die(_("could not resolve ref '%s'"), o.branch1);
+	if (get_oid(o.branch2, &h2))
+		die(_("could not resolve ref '%s'"), o.branch2);
+
+	//o.branch1 = better_branch_name(o.branch1);
+	//o.branch2 = better_branch_name(o.branch2);
+
+    printf(_("Merging %s with %s\n"), o.branch1, o.branch2);
+
+	const struct object_id *bases[1];
+    int bases_count = 1;
+	struct commit *result;
+    struct object_id *oid = xmalloc(sizeof(struct object_id));
+    get_oid(sha1_to_hex(b_tree), oid);
+    bases[0] = oid;
+
+	ret = merge_recursive_generic(&o, &h1, &h2, bases_count, bases, &result);
+	if (ret < 0)
+		return 128; /* die() error code */
+
+    reset_tree(c_tree, 0);
+
+	return 0;
 }
 
 static int apply_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL;
+    int index;
 	struct option options[] = {
+		OPT_BOOL(0, "index", &index,
+			 N_("perform 'git stash next'")),
 		OPT_END()
 	};
 
