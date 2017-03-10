@@ -61,11 +61,11 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	struct strbuf i_tree_rev = STRBUF_INIT;
 	struct object_context unused;
 	struct strbuf commit_buf = STRBUF_INIT;
+	int ret;
+	const char *REV = commit;
 	info->is_stash_ref = 0;
 
-	int ret;
 
-	const char *REV = commit;
 	if (commit == NULL) {
 		REV = "refs/stash@{0}";
 	} else if (strlen(commit) < 3) {
@@ -144,7 +144,7 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 {
 	struct object_id curr_head;
 	char *branch_path = NULL;
-	const char *branch_name;
+	const char *branch_name = NULL;
 	unsigned char i_tree[20];
 	unsigned char w_tree[20];
 	unsigned char w_commit[20];
@@ -152,8 +152,20 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 	unsigned char b_commit[20];
 	struct commit_list *parents = NULL;
 	int ret;
+	struct strbuf out = STRBUF_INIT;
+	struct pretty_print_context ctx = {0};
 
 	struct commit *c = NULL;
+	const char *hash;
+	struct unpack_trees_options opts;
+	int nr_trees = 1;
+	struct tree_desc t[MAX_UNPACK_TREES];
+	struct tree *tree;
+	struct rev_info rev;
+	int cached = 0;
+	struct foo_callback_data data;
+	struct object *obj;
+	struct strbuf out2 = STRBUF_INIT;
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	//if (check_no_changes(prefix))
@@ -178,12 +190,10 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 
 	c = lookup_commit(b_commit);
 
-	struct strbuf out = STRBUF_INIT;
-	struct pretty_print_context ctx = {0};
 	ctx.output_encoding = get_log_output_encoding();
 	ctx.abbrev = 1;
 	ctx.fmt = CMIT_FMT_ONELINE;
-	const char *hash = find_unique_abbrev(c->object.oid.hash, DEFAULT_ABBREV);
+	hash = find_unique_abbrev(c->object.oid.hash, DEFAULT_ABBREV);
 
 
 	strbuf_addf(&out, "%s: %s ", branch_name, hash);
@@ -196,10 +206,7 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 	//printf("%s\n", sha1_to_hex(i_commit));
 
 
-	struct unpack_trees_options opts;
-	int nr_trees = 1;
-	struct tree_desc t[MAX_UNPACK_TREES];
-	struct tree *tree;
+
 
 	memset(&opts, 0, sizeof(opts));
 
@@ -219,22 +226,23 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 
 	prime_cache_tree(&the_index, tree);
 
-	struct rev_info rev;
-	int cached = 0;
 
 	init_revisions(&rev, prefix);
 	setup_revisions(0, NULL, &rev, NULL);
 	rev.diffopt.output_format |= DIFF_FORMAT_CALLBACK;
-	struct foo_callback_data data;
 	data.argv = argv;
 	rev.diffopt.format_callback_data = &data;
 	rev.diffopt.format_callback = foo_callback;
 	diff_setup_done(&rev.diffopt);
 	//setup_revisions(0, NULL, &rev, NULL);
 	//struct tree *head_tree = lookup_tree(head.hash);
-	struct object *obj = parse_object(b_commit);
+	obj = parse_object(b_commit);
 	add_pending_object(&rev, obj, "");
-	int result = run_diff_index(&rev, cached);
+	ret = run_diff_index(&rev, cached);
+
+	if (ret != 0) {
+		return ret;
+	}
 
 	ret = write_cache_as_tree(w_tree, 0, NULL);
 	//printf("wtree: %s\n", sha1_to_hex(w_tree));
@@ -245,7 +253,6 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 	commit_list_insert(lookup_commit(b_commit), &parents);
 
 
-	struct strbuf out2 = STRBUF_INIT;
 
 	if (message != NULL && strlen(message) != 0) {
 		strbuf_addf(&out2, "On %s: %s", branch_name, message);
@@ -280,6 +287,8 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 {
 	int include_untracked = 0;
 	const char *message = NULL;
+	struct stash_info info = {0};
+	int result;
 	struct option options[] = {
 		OPT_BOOL('u', "include-untracked", &include_untracked,
 			 N_("perform 'git stash next'")),
@@ -302,9 +311,8 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 		message = out.buf;
 	}
 
-	struct stash_info info = {0};
 
-	int result = do_create_stash(&info, prefix, message, include_untracked, NULL);
+	result = do_create_stash(&info, prefix, message, include_untracked, NULL);
 	printf("%s\n", sha1_to_hex(info.w_commit));
 	return result;
 }
@@ -316,7 +324,9 @@ static int do_store_stash(const char *prefix, const char *message, unsigned char
 
 static int store_stash(int argc, const char **argv, const char *prefix)
 {
-	const char *message;
+	const char *message = NULL;
+	const char *commit = NULL;
+	unsigned char sha1[20];
 	struct option options[] = {
 		OPT_STRING('m', "message", &message, N_("message"),
 			 N_("perform 'git stash next'")),
@@ -333,8 +343,7 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 		die("no commit?");
 	}
 
-	unsigned char sha1[20];
-	const char *commit = argv[0];
+	commit = argv[0];
 
 	if (get_sha1(commit, sha1)) {
 		die("%s: not a valid SHA1", commit);
@@ -343,7 +352,7 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 	return do_store_stash(prefix, message, sha1);
 }
 
-static int do_clear_stash()
+static int do_clear_stash(void)
 {
 	unsigned char w_commit[20];
 	struct object_context unused;
@@ -399,11 +408,14 @@ static int reset_tree(unsigned char i_tree[20], int update, int reset)
 	if (write_locked_index(&the_index, &lock_file, COMMIT_LOCK)) {
 		return error(_("unable to write new index file"));
 	}
+
+	return 0;
 }
 
 static int do_push_stash(const char *prefix, const char *message, int keep_index, const char **argv)
 {
 	int result;
+	struct stash_info info = {0};
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix)) {
@@ -419,7 +431,6 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 		}
 	}
 
-	struct stash_info info = {0};
 
 	do_create_stash(&info, prefix, message, 0, argv);
 	result = do_store_stash(prefix, info.message, info.w_commit);
@@ -429,6 +440,20 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 	}
 
 	if (argv) {
+		struct argv_array args;
+		argv_array_init(&args);
+		argv_array_push(&args, "reset");
+		argv_array_push(&args, "--");
+		argv_array_pushv(&args, argv);
+		cmd_reset(args.argc, args.argv, prefix);
+
+		argv_array_init(&args);
+		argv_array_push(&args, "clean");
+		argv_array_push(&args, "--force");
+		argv_array_push(&args, "-d");
+		argv_array_push(&args, "--");
+		argv_array_pushv(&args, argv);
+		cmd_clean(args.argc, args.argv, prefix);
 	} else {
 		struct argv_array args;
 		argv_array_init(&args);
@@ -453,6 +478,7 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 	const char *message = NULL;
 	int include_untracked = 0;
 	int keep_index = 0;
+	const char **args = NULL;
 	struct option options[] = {
 		OPT_BOOL('u', "include-untracked", &include_untracked,
 			 N_("perform 'git stash next'")),
@@ -467,7 +493,6 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_helper_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
-	const char **args = NULL;
 
 	if (argc != 0) {
 		args = argv;
@@ -506,6 +531,11 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	struct stash_info info = {0};
 	unsigned char c_tree[20];
 	unsigned char index_tree[20];
+	const struct object_id *bases[1];
+	int bases_count = 1;
+	struct commit *result;
+	const char *me = "git-stash";
+	struct object_id *oid;
 
 	ret = get_stash_info(&info, commit);
 
@@ -515,7 +545,6 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 
 	ret = write_cache_as_tree(c_tree, 0, NULL);
-	const char *me = "git-stash";
 	switch (ret) {
 	case 0:
 		break;
@@ -535,28 +564,28 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 		if (memcmp(info.b_tree, info.i_tree, 20) == 0 || memcmp(c_tree, info.i_tree, 20) == 0) {
 			index = 0;
 		} else {
-		struct child_process cp = CHILD_PROCESS_INIT;
-		struct child_process cp2 = CHILD_PROCESS_INIT;
-		cp.git_cmd = 1;
-		argv_array_push(&cp.args, "diff-tree");
-		argv_array_push(&cp.args, "--binary");
-		argv_array_pushf(&cp.args, "%s^2^..%s^2", sha1_to_hex(info.w_commit), sha1_to_hex(info.w_commit));
-		struct strbuf out = STRBUF_INIT;
-		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+			struct child_process cp = CHILD_PROCESS_INIT;
+			struct child_process cp2 = CHILD_PROCESS_INIT;
+			struct strbuf out = STRBUF_INIT;
+			struct argv_array args;
+			cp.git_cmd = 1;
+			argv_array_push(&cp.args, "diff-tree");
+			argv_array_push(&cp.args, "--binary");
+			argv_array_pushf(&cp.args, "%s^2^..%s^2", sha1_to_hex(info.w_commit), sha1_to_hex(info.w_commit));
+			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
-		cp2.git_cmd = 1;
-		argv_array_push(&cp2.args, "apply");
-		argv_array_push(&cp2.args, "--cached");
-		pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
+			cp2.git_cmd = 1;
+			argv_array_push(&cp2.args, "apply");
+			argv_array_push(&cp2.args, "--cached");
+			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
-		discard_cache();
-		read_cache();
-		ret = write_cache_as_tree(index_tree, 0, NULL);
+			discard_cache();
+			read_cache();
+			ret = write_cache_as_tree(index_tree, 0, NULL);
 
-		struct argv_array args;
-		argv_array_init(&args);
-		argv_array_push(&args, "reset");
-		cmd_reset(args.argc, args.argv, prefix);
+			argv_array_init(&args);
+			argv_array_push(&args, "reset");
+			cmd_reset(args.argc, args.argv, prefix);
 		}
 	}
 
@@ -582,10 +611,7 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 		o.verbosity = 0;
 	//}
 
-	const struct object_id *bases[1];
-	int bases_count = 1;
-	struct commit *result;
-	struct object_id *oid = xmalloc(sizeof(struct object_id));
+	oid = xmalloc(sizeof(struct object_id));
 	get_oid(sha1_to_hex(info.b_tree), oid);
 	bases[0] = oid;
 
@@ -635,6 +661,7 @@ static int do_drop_stash(const char *prefix, const char *commit)
 	struct argv_array args;
 	int ret;
 	struct stash_info info = {0};
+	struct child_process cp = CHILD_PROCESS_INIT;
 
 	ret = get_stash_info(&info, commit);
 	argv_array_init(&args);
@@ -652,7 +679,6 @@ static int do_drop_stash(const char *prefix, const char *commit)
 		die("could not drop");
 	}
 
-	struct child_process cp = CHILD_PROCESS_INIT;
 	cp.git_cmd = 1;
 	argv_array_init(&cp.args);
 	argv_array_push(&cp.args, "rev-parse");
@@ -691,18 +717,18 @@ static int list_stash(int argc, const char **argv, const char *prefix)
 		OPT_END()
 	};
 
-	argc = parse_options(argc, argv, prefix, options,
-				 git_stash_helper_usage, PARSE_OPT_KEEP_UNKNOWN);
 
 	unsigned char w_commit[20];
 	struct object_context unused;
 	int ret;
+	struct argv_array args;
+	argc = parse_options(argc, argv, prefix, options,
+				 git_stash_helper_usage, PARSE_OPT_KEEP_UNKNOWN);
 	ret = get_sha1_with_context(ref_stash, 0, w_commit, &unused);
 	if (ret != 0) {
 		return 0;
 	}
 
-	struct argv_array args;
 	argv_array_init(&args);
 	argv_array_push(&args, "log");
 	argv_array_push(&args, "--format=%gd: %gs");
@@ -798,6 +824,8 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL, *branch = NULL;
 	int ret;
+	struct argv_array args;
+	struct stash_info info = {0};
 	struct option options[] = {
 		OPT_END()
 	};
@@ -811,11 +839,9 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 			commit = argv[1];
 		}
 	}
-	struct stash_info info = {0};
 
 	ret = get_stash_info(&info, commit);
 
-	struct argv_array args;
 	argv_array_init(&args);
 	argv_array_push(&args, "checkout");
 	argv_array_push(&args, "-b");
