@@ -287,7 +287,7 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 {
 	int include_untracked = 0;
 	const char *message = NULL;
-	struct stash_info info = {0};
+	struct stash_info info;
 	int result;
 	struct option options[] = {
 		OPT_BOOL('u', "include-untracked", &include_untracked,
@@ -302,7 +302,8 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 
 	if (argc != 0) {
 		struct strbuf out = STRBUF_INIT;
-		for (int i = 0; i < argc; ++i) {
+		int i;
+		for (i = 0; i < argc; ++i) {
 			if (i != 0) {
 				strbuf_addf(&out, " ");
 			}
@@ -415,7 +416,7 @@ static int reset_tree(unsigned char i_tree[20], int update, int reset)
 static int do_push_stash(const char *prefix, const char *message, int keep_index, const char **argv)
 {
 	int result;
-	struct stash_info info = {0};
+	struct stash_info info;
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix)) {
@@ -528,7 +529,7 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	struct object_id h1, h2;
 	struct merge_options o;
 	int ret;
-	struct stash_info info = {0};
+	struct stash_info info;
 	unsigned char c_tree[20];
 	unsigned char index_tree[20];
 	const struct object_id *bases[1];
@@ -660,7 +661,7 @@ static int do_drop_stash(const char *prefix, const char *commit)
 {
 	struct argv_array args;
 	int ret;
-	struct stash_info info = {0};
+	struct stash_info info;
 	struct child_process cp = CHILD_PROCESS_INIT;
 
 	ret = get_stash_info(&info, commit);
@@ -745,7 +746,7 @@ static int list_stash(int argc, const char **argv, const char *prefix)
 static int show_stash(int argc, const char **argv, const char *prefix)
 {
 	struct argv_array args;
-	struct stash_info info = {0};
+	struct stash_info info;
 	const char *commit = NULL;
 	int ret;
 	int numstat = 0;
@@ -785,8 +786,7 @@ static int show_stash(int argc, const char **argv, const char *prefix)
 
 static int do_pop_stash(const char *prefix, const char *commit, int index)
 {
-
-	struct stash_info info = {0};
+	struct stash_info info;
 
 	get_stash_info(&info, commit);
 	if (!info.is_stash_ref) {
@@ -825,7 +825,7 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 	const char *commit = NULL, *branch = NULL;
 	int ret;
 	struct argv_array args;
-	struct stash_info info = {0};
+	struct stash_info info;
 	struct option options[] = {
 		OPT_END()
 	};
