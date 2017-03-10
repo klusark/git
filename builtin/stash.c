@@ -442,11 +442,30 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 
 	if (argv) {
 		struct argv_array args;
+		struct child_process cp = CHILD_PROCESS_INIT;
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		struct strbuf out = STRBUF_INIT;
 		argv_array_init(&args);
 		argv_array_push(&args, "reset");
 		argv_array_push(&args, "--");
 		argv_array_pushv(&args, argv);
 		cmd_reset(args.argc, args.argv, prefix);
+
+
+		cp.git_cmd = 1;
+		argv_array_push(&cp.args, "ls-files");
+		argv_array_push(&cp.args, "-z");
+		argv_array_push(&cp.args, "--modified");
+		argv_array_push(&cp.args, "--");
+		argv_array_pushv(&cp.args, argv);
+		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "checkout-index");
+		argv_array_push(&cp2.args, "-z");
+		argv_array_push(&cp2.args, "--force");
+		argv_array_push(&cp2.args, "--stdin");
+		pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
 		argv_array_init(&args);
 		argv_array_push(&args, "clean");
@@ -540,8 +559,10 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 
 	ret = get_stash_info(&info, commit);
 
-	if (!ret)
+	if (!ret) {
 		printf("invalid");
+		return 1;
+	}
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 
@@ -603,6 +624,8 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 
 	//o.branch1 = better_branch_name(o.branch1);
 	//o.branch2 = better_branch_name(o.branch2);
+	o.branch1 = "Updated upstream";
+	o.branch2 = "Stashed changes";
 
 	if (!quiet) {
 		//printf(_("Merging %s with %s\n"), o.branch1, o.branch2);
@@ -615,15 +638,37 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	oid = xmalloc(sizeof(struct object_id));
 	get_oid(sha1_to_hex(info.b_tree), oid);
 	bases[0] = oid;
+	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+			discard_cache();
+			read_cache();
 
 	ret = merge_recursive_generic(&o, &h1, &h2, bases_count, bases, &result);
-	if (ret < 0)
+	if (ret < 0) {
+
 		return 128; /* die() error code */
+	}
 
 	if (index) {
 		reset_tree(index_tree, 0, 0);
 	} else {
+		struct child_process cp = CHILD_PROCESS_INIT;
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		struct strbuf out = STRBUF_INIT;
+		cp.git_cmd = 1;
+		argv_array_push(&cp.args, "diff-index");
+		argv_array_push(&cp.args, "--cached");
+		argv_array_push(&cp.args, "--name-only");
+		argv_array_push(&cp.args, "--diff-filter=A");
+		argv_array_push(&cp.args, sha1_to_hex(c_tree));
+		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+
 		reset_tree(c_tree, 0, 1);
+
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "update-index");
+		argv_array_push(&cp2.args, "--add");
+		argv_array_push(&cp2.args, "--stdin");
+		pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 	}
 
 	if (!quiet) {
