@@ -437,10 +437,14 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 		printf("Saved working directory and index state $stash_msg\n");
 	}
 
-	if (quiet) {
-		cmd_reset(ARRAY_SIZE(reset_quiet_args) - 1, reset_quiet_args, prefix);
+	if (argv) {
 	} else {
-		cmd_reset(ARRAY_SIZE(reset_args) - 1, reset_args, prefix);
+
+		if (quiet) {
+			cmd_reset(ARRAY_SIZE(reset_quiet_args) - 1, reset_quiet_args, prefix);
+		} else {
+			cmd_reset(ARRAY_SIZE(reset_args) - 1, reset_args, prefix);
+		}
 	}
 
 	if (keep_index) {
