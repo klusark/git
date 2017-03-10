@@ -29,15 +29,6 @@ static const char *diff_files_args[] = {
 	"diff-files", "--quiet", "--ignore-submodules", NULL
 };
 
-// TODO: quiet isn' always
-static const char *reset_quiet_args[] = {
-	"reset", "--hard", "--quiet", NULL
-};
-
-static const char *reset_args[] = {
-	"reset", "--hard", NULL
-};
-
 static const char *ref_stash = "refs/stash";
 static int quiet = 0;
 static struct lock_file lock_file;
@@ -439,12 +430,14 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 
 	if (argv) {
 	} else {
-
+		struct argv_array args;
+		argv_array_init(&args);
+		argv_array_push(&args, "reset");
+		argv_array_push(&args, "--hard");
 		if (quiet) {
-			cmd_reset(ARRAY_SIZE(reset_quiet_args) - 1, reset_quiet_args, prefix);
-		} else {
-			cmd_reset(ARRAY_SIZE(reset_args) - 1, reset_args, prefix);
+			argv_array_push(&args, "--quiet");
 		}
+		cmd_reset(args.argc, args.argv, prefix);
 	}
 
 	if (keep_index) {
@@ -619,7 +612,7 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 static int apply_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL;
-	int index;
+	int index = 0;
 	struct option options[] = {
 		OPT_BOOL(0, "index", &index,
 			 N_("perform 'git stash next'")),
