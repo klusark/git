@@ -37,16 +37,21 @@ struct stash_info {
 	unsigned char w_commit[20];
 	unsigned char b_commit[20];
 	unsigned char i_commit[20];
+	unsigned char u_commit[20];
 	unsigned char w_tree[20];
 	unsigned char b_tree[20];
 	unsigned char i_tree[20];
+	unsigned char u_tree[20];
 	const char *message;
 	const char *REV;
 	int is_stash_ref;
+	int has_u;
+	const char *patch;
 };
 
 static int check_no_changes(const char *prefix)
 {
+	return 0;
 	return cmd_diff_index(ARRAY_SIZE(diff_index_args) - 1, diff_index_args, prefix) == 0 &&
 		cmd_diff_files(ARRAY_SIZE(diff_files_args) - 1, diff_files_args, prefix) == 0;
 }
@@ -56,9 +61,11 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	struct strbuf w_commit_rev = STRBUF_INIT;
 	struct strbuf b_commit_rev = STRBUF_INIT;
 	struct strbuf i_commit_rev = STRBUF_INIT;
+	struct strbuf u_commit_rev = STRBUF_INIT;
 	struct strbuf w_tree_rev = STRBUF_INIT;
 	struct strbuf b_tree_rev = STRBUF_INIT;
 	struct strbuf i_tree_rev = STRBUF_INIT;
+	struct strbuf u_tree_rev = STRBUF_INIT;
 	struct object_context unused;
 	struct strbuf commit_buf = STRBUF_INIT;
 	int ret;
@@ -77,9 +84,11 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	strbuf_addf(&w_commit_rev, "%s", REV);
 	strbuf_addf(&b_commit_rev, "%s^1", REV);
 	strbuf_addf(&i_commit_rev, "%s^2", REV);
+	strbuf_addf(&u_commit_rev, "%s^3", REV);
 	strbuf_addf(&w_tree_rev, "%s:", REV);
 	strbuf_addf(&b_tree_rev, "%s^1:", REV);
 	strbuf_addf(&i_tree_rev, "%s^2:", REV);
+	strbuf_addf(&u_tree_rev, "%s^3:", REV);
 
 
 	ret = (
@@ -90,6 +99,8 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 		get_sha1_with_context(b_tree_rev.buf, 0, info->b_tree, &unused) == 0 &&
 		get_sha1_with_context(i_tree_rev.buf, 0, info->i_tree, &unused) == 0);
 
+	info->has_u = get_sha1_with_context(u_commit_rev.buf, 0, info->u_commit, &unused) == 0 &&
+	get_sha1_with_context(u_tree_rev.buf, 0, info->u_tree, &unused) == 0;
 	/*char *full = NULL;
 	unsigned char discard[20];
 	dwim_ref(REV, strlen(REV), discard, &full);
@@ -139,17 +150,19 @@ static void foo_callback(struct diff_queue_struct *q,
 	}
 }
 
-
-static int do_create_stash(struct stash_info *stash_info, const char *prefix, const char *message, int include_untracked, const char **argv)
+static int do_create_stash(struct stash_info *stash_info, const char *prefix,
+	const char *message, int include_untracked, int patch, const char **argv)
 {
 	struct object_id curr_head;
 	char *branch_path = NULL;
 	const char *branch_name = NULL;
 	unsigned char i_tree[20];
 	unsigned char w_tree[20];
+	unsigned char u_tree[20];
 	unsigned char w_commit[20];
 	unsigned char i_commit[20];
 	unsigned char b_commit[20];
+	unsigned char u_commit[20];
 	struct commit_list *parents = NULL;
 	int ret;
 	struct strbuf out = STRBUF_INIT;
@@ -166,6 +179,7 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 	struct foo_callback_data data;
 	struct object *obj;
 	struct strbuf out2 = STRBUF_INIT;
+	struct strbuf out3 = STRBUF_INIT;
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	//if (check_no_changes(prefix))
@@ -185,69 +199,181 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix, co
 		skip_prefix(branch_path, "refs/heads/", &branch_name);
 	}
 
-
-	ret = write_cache_as_tree(i_tree, 0, NULL);
-
 	c = lookup_commit(b_commit);
 
 	ctx.output_encoding = get_log_output_encoding();
 	ctx.abbrev = 1;
 	ctx.fmt = CMIT_FMT_ONELINE;
 	hash = find_unique_abbrev(c->object.oid.hash, DEFAULT_ABBREV);
-
+	ret = write_cache_as_tree(i_tree, 0, NULL);
 
 	strbuf_addf(&out, "%s: %s ", branch_name, hash);
+
 	pretty_print_commit(&ctx, c, &out);
 
 
 	commit_list_insert(lookup_commit(b_commit), &parents);
 
 	ret = commit_tree(out.buf, out.len, i_tree, parents, i_commit, NULL, NULL);
-	//printf("%s\n", sha1_to_hex(i_commit));
 
 
 
+	if (include_untracked) {
+		struct child_process cp = CHILD_PROCESS_INIT;
+		struct strbuf out4 = STRBUF_INIT;
+		const char * curr;
+		struct object_id orig_tree;
+		const char *index_path = ".git/foocache1";
+		cp.git_cmd = 1;
+		argv_array_push(&cp.args, "ls-files");
+		argv_array_push(&cp.args, "-o");
+		argv_array_push(&cp.args, "-z");
+		argv_array_push(&cp.args, "--exclude-standard");
+		if (argv) {
+			argv_array_push(&cp.args, "--");
+			argv_array_pushv(&cp.args, argv);
+		}
+		pipe_command(&cp, NULL, 0, &out4, 0, NULL, 0);
 
-	memset(&opts, 0, sizeof(opts));
-
-	tree = parse_tree_indirect(i_tree);
-	parse_tree(tree);
-
-	opts.head_idx = 1;
-	opts.src_index = &the_index;
-	opts.dst_index = &the_index;
-	opts.merge = 1;
-	opts.fn = oneway_merge;
-
-	init_tree_desc(t, tree->buffer, tree->size);
-
-	if (unpack_trees(nr_trees, t, &opts))
-		return -1;
-
-	prime_cache_tree(&the_index, tree);
+		discard_cache();
+		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		discard_cache();
+		ret = read_cache_from(index_path);
+		curr = out4.buf;
+		while (strlen(curr)) {
+			const char *path = curr;
+			//struct stat st;
+			printf("%s\n", path);
+			add_file_to_cache(path, 0);
+			//remove_file_from_index(&the_index, path);
+			//if (!lstat(path, &st))
+			//	add_to_index(&the_index, path, &st, 0);
+			curr = curr + strlen(curr) + 1;
+		}
 
 
-	init_revisions(&rev, prefix);
-	setup_revisions(0, NULL, &rev, NULL);
-	rev.diffopt.output_format |= DIFF_FORMAT_CALLBACK;
-	data.argv = argv;
-	rev.diffopt.format_callback_data = &data;
-	rev.diffopt.format_callback = foo_callback;
-	diff_setup_done(&rev.diffopt);
-	//setup_revisions(0, NULL, &rev, NULL);
-	//struct tree *head_tree = lookup_tree(head.hash);
-	obj = parse_object(b_commit);
-	add_pending_object(&rev, obj, "");
-	ret = run_diff_index(&rev, cached);
+		ret = write_cache_as_tree(u_tree, 0, NULL);
+		strbuf_addf(&out3, "untracked files on %s", out.buf);
 
-	if (ret != 0) {
-		return ret;
+		ret = commit_tree(out3.buf, out3.len, u_tree, NULL, u_commit, NULL, NULL);
+
+		discard_cache();
+		read_cache();
+
 	}
 
-	ret = write_cache_as_tree(w_tree, 0, NULL);
-	//printf("wtree: %s\n", sha1_to_hex(w_tree));
 
+	if (patch) {
+		const char *index_path = ".git/foocache2";
+		//struct object_id orig_tree;
+		struct argv_array args;
+		struct child_process cp = CHILD_PROCESS_INIT;
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		struct strbuf out = STRBUF_INIT;
+
+		//discard_cache();
+		//tree = parse_tree_indirect(b_commit);
+		//prime_cache_tree(&the_index, tree);
+		//write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		//discard_cache();
+
+		//read_cache_from(index_path);
+
+		argv_array_init(&args);
+		argv_array_push(&args, "read-tree");
+		argv_array_push(&args, "HEAD");
+		argv_array_pushf(&args, "--index-output=%s", index_path);
+		cmd_read_tree(args.argc, args.argv, prefix);
+		//write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+
+
+
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "add--interactive");
+		argv_array_push(&cp2.args, "--patch=stash");
+		argv_array_push(&cp2.args, "--");
+		argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", index_path);
+		ret = run_command(&cp2);
+
+		discard_cache();
+		read_cache_from(index_path);
+
+		ret = write_cache_as_tree(w_tree, 0, NULL);
+
+		cp.git_cmd = 1;
+		argv_array_push(&cp.args, "diff-tree");
+		argv_array_push(&cp.args, "-p");
+		argv_array_push(&cp.args, "HEAD");
+		argv_array_push(&cp.args, sha1_to_hex(w_tree));
+		argv_array_push(&cp.args, "--");
+		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+		if (out.len == 0) {
+			die("butts");
+		}
+
+		stash_info->patch = out.buf;
+
+		discard_cache();
+		read_cache();
+
+	} else {
+		const char *index_path = ".git/foocache3";
+		struct object_id orig_tree;
+
+		discard_cache();
+		tree = parse_tree_indirect(i_tree);
+		prime_cache_tree(&the_index, tree);
+		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		discard_cache();
+
+		read_cache_from(index_path);
+
+
+		memset(&opts, 0, sizeof(opts));
+
+		parse_tree(tree);
+
+		opts.head_idx = 1;
+		opts.src_index = &the_index;
+		opts.dst_index = &the_index;
+		opts.merge = 1;
+		opts.fn = oneway_merge;
+
+		init_tree_desc(t, tree->buffer, tree->size);
+
+		if (unpack_trees(nr_trees, t, &opts))
+			return -1;
+
+
+
+		init_revisions(&rev, prefix);
+		setup_revisions(0, NULL, &rev, NULL);
+		rev.diffopt.output_format |= DIFF_FORMAT_CALLBACK;
+		data.argv = argv;
+		rev.diffopt.format_callback_data = &data;
+		rev.diffopt.format_callback = foo_callback;
+		diff_setup_done(&rev.diffopt);
+		//setup_revisions(0, NULL, &rev, NULL);
+		//struct tree *head_tree = lookup_tree(head.hash);
+		obj = parse_object(b_commit);
+		add_pending_object(&rev, obj, "");
+		ret = run_diff_index(&rev, cached);
+
+		if (ret != 0) {
+			return ret;
+		}
+
+		ret = write_cache_as_tree(w_tree, 0, NULL);
+		discard_cache();
+		read_cache();
+
+		//printf("wtree: %s\n", sha1_to_hex(w_tree));
+	}
 	parents = NULL;
+
+	if (include_untracked) {
+		commit_list_insert(lookup_commit(u_commit), &parents);
+	}
 
 	commit_list_insert(lookup_commit(i_commit), &parents);
 	commit_list_insert(lookup_commit(b_commit), &parents);
@@ -313,7 +439,7 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 	}
 
 
-	result = do_create_stash(&info, prefix, message, include_untracked, NULL);
+	result = do_create_stash(&info, prefix, message, include_untracked, 0, NULL);
 	printf("%s\n", sha1_to_hex(info.w_commit));
 	return result;
 }
@@ -383,14 +509,23 @@ static int reset_tree(unsigned char i_tree[20], int update, int reset)
 	int nr_trees = 1;
 	struct tree_desc t[MAX_UNPACK_TREES];
 	struct tree *tree;
+	int ret;
 
-	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+	ret = refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+	if (ret != 0) {
+		printf("asdf1\n");
+		return ret;
+	}
 	hold_locked_index(&lock_file, LOCK_DIE_ON_ERROR);
 
 	memset(&opts, 0, sizeof(opts));
 
 	tree = parse_tree_indirect(i_tree);
-	parse_tree(tree);
+	ret = parse_tree(tree);
+	if (ret != 0) {
+		printf("asdf3\n");
+		return ret;
+	}
 	init_tree_desc(t, tree->buffer, tree->size);
 
 	opts.head_idx = 1;
@@ -403,18 +538,20 @@ static int reset_tree(unsigned char i_tree[20], int update, int reset)
 
 
 	if (unpack_trees(nr_trees, t, &opts))
-		return -1;
+		return 1;
 
 	prime_cache_tree(&the_index, tree);
 
 	if (write_locked_index(&the_index, &lock_file, COMMIT_LOCK)) {
-		return error(_("unable to write new index file"));
+		error(_("unable to write new index file"));
+		return 1;
 	}
 
 	return 0;
 }
 
-static int do_push_stash(const char *prefix, const char *message, int keep_index, const char **argv)
+static int do_push_stash(const char *prefix, const char *message,
+		int keep_index, int include_untracked, int patch, const char **argv)
 {
 	int result;
 	struct stash_info info;
@@ -434,60 +571,89 @@ static int do_push_stash(const char *prefix, const char *message, int keep_index
 	}
 
 
-	do_create_stash(&info, prefix, message, 0, argv);
+	do_create_stash(&info, prefix, message, include_untracked, patch, argv);
 	result = do_store_stash(prefix, info.message, info.w_commit);
 
 	if (result == 0 && !quiet) {
 		printf("Saved working directory and index state $stash_msg\n");
 	}
 
-	if (argv) {
-		struct argv_array args;
-		struct child_process cp = CHILD_PROCESS_INIT;
-		struct child_process cp2 = CHILD_PROCESS_INIT;
-		struct strbuf out = STRBUF_INIT;
-		argv_array_init(&args);
-		argv_array_push(&args, "reset");
-		argv_array_push(&args, "--");
-		argv_array_pushv(&args, argv);
-		cmd_reset(args.argc, args.argv, prefix);
+	if (!patch) {
+		if (argv) {
+			struct argv_array args;
+			struct child_process cp = CHILD_PROCESS_INIT;
+			struct child_process cp2 = CHILD_PROCESS_INIT;
+			struct strbuf out = STRBUF_INIT;
+			argv_array_init(&args);
+			argv_array_push(&args, "reset");
+			argv_array_push(&args, "--");
+			argv_array_pushv(&args, argv);
+			cmd_reset(args.argc, args.argv, prefix);
 
 
-		cp.git_cmd = 1;
-		argv_array_push(&cp.args, "ls-files");
-		argv_array_push(&cp.args, "-z");
-		argv_array_push(&cp.args, "--modified");
-		argv_array_push(&cp.args, "--");
-		argv_array_pushv(&cp.args, argv);
-		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+			cp.git_cmd = 1;
+			argv_array_push(&cp.args, "ls-files");
+			argv_array_push(&cp.args, "-z");
+			argv_array_push(&cp.args, "--modified");
+			argv_array_push(&cp.args, "--");
+			argv_array_pushv(&cp.args, argv);
+			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
-		cp2.git_cmd = 1;
-		argv_array_push(&cp2.args, "checkout-index");
-		argv_array_push(&cp2.args, "-z");
-		argv_array_push(&cp2.args, "--force");
-		argv_array_push(&cp2.args, "--stdin");
-		pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
+			cp2.git_cmd = 1;
+			argv_array_push(&cp2.args, "checkout-index");
+			argv_array_push(&cp2.args, "-z");
+			argv_array_push(&cp2.args, "--force");
+			argv_array_push(&cp2.args, "--stdin");
+			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
-		argv_array_init(&args);
-		argv_array_push(&args, "clean");
-		argv_array_push(&args, "--force");
-		argv_array_push(&args, "-d");
-		argv_array_push(&args, "--");
-		argv_array_pushv(&args, argv);
-		cmd_clean(args.argc, args.argv, prefix);
-	} else {
-		struct argv_array args;
-		argv_array_init(&args);
-		argv_array_push(&args, "reset");
-		argv_array_push(&args, "--hard");
-		if (quiet) {
-			argv_array_push(&args, "--quiet");
+			argv_array_init(&args);
+			argv_array_push(&args, "clean");
+			argv_array_push(&args, "--force");
+			argv_array_push(&args, "-d");
+			argv_array_push(&args, "--");
+			argv_array_pushv(&args, argv);
+			cmd_clean(args.argc, args.argv, prefix);
+		} else {
+			struct argv_array args;
+			argv_array_init(&args);
+			argv_array_push(&args, "reset");
+			argv_array_push(&args, "--hard");
+			if (quiet) {
+				argv_array_push(&args, "--quiet");
+			}
+			cmd_reset(args.argc, args.argv, prefix);
 		}
-		cmd_reset(args.argc, args.argv, prefix);
-	}
 
-	if (keep_index) {
-		reset_tree(info.i_tree, 1, 1);
+		if (include_untracked) {
+			struct argv_array args;
+			argv_array_init(&args);
+			argv_array_push(&args, "clean");
+			argv_array_push(&args, "--force");
+			argv_array_push(&args, "--quiet");
+			argv_array_push(&args, "-d");
+			cmd_clean(args.argc, args.argv, prefix);
+		}
+
+		if (keep_index) {
+			reset_tree(info.i_tree, 1, 1);
+		}
+	} else {
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "apply");
+		argv_array_push(&cp2.args, "-R");
+		result = pipe_command(&cp2, info.patch, strlen(info.patch), NULL, 0, NULL, 0);
+		if (result != 0) {
+			die(_("Cannot remove worktree changes"));
+		}
+		refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+		if (!keep_index) {
+			struct child_process cp = CHILD_PROCESS_INIT;
+			cp.git_cmd = 1;
+			argv_array_init(&cp.args);
+			argv_array_push(&cp.args, "reset");
+			run_command(&cp);
+		}
 	}
 
 	return 0;
@@ -498,6 +664,8 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *message = NULL;
 	int include_untracked = 0;
+	int patch = 0;
+	int keep_index_set = -1;
 	int keep_index = 0;
 	const char **args = NULL;
 	struct option options[] = {
@@ -508,38 +676,59 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
 		OPT_STRING('m', "message", &message, N_("message"),
 			 N_("perform 'git stash next'")),
+		OPT_BOOL('p', "patch", &patch,
+			 N_("perform 'git stash next'")),
 		OPT_END()
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_helper_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
+	if (patch && include_untracked) {
+		die(_("Can't use --patch and --include-untracked or --all at the same time"));
+	}
+
+	if (keep_index_set != -1) {
+		keep_index = keep_index_set;
+	} else if (patch) {
+		keep_index = 1;
+	}
 
 	if (argc != 0) {
 		args = argv;
 	}
 
-	return do_push_stash(prefix, message, keep_index, args);
+	return do_push_stash(prefix, message, keep_index, include_untracked, 0, args);
 }
 
 static int save_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *message = NULL;
 	int include_untracked = 0;
+	int patch = 0;
+	int keep_index_set = -1;
 	int keep_index = 0;
 	struct option options[] = {
 		OPT_BOOL('u', "include-untracked", &include_untracked,
 			 N_("perform 'git stash next'")),
-		OPT_BOOL('k', "keep-index", &keep_index,
+		OPT_BOOL('k', "keep-index", &keep_index_set,
 			 N_("perform 'git stash next'")),
 		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
 		OPT_STRING('m', "message", &message, N_("message"),
+			 N_("perform 'git stash next'")),
+		OPT_BOOL('p', "patch", &patch,
 			 N_("perform 'git stash next'")),
 		OPT_END()
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_helper_usage, PARSE_OPT_STOP_AT_NON_OPTION);
+
+	if (keep_index_set != -1) {
+		keep_index = keep_index_set;
+	} else if (patch) {
+		keep_index = 1;
+	}
 
 	if (argc != 0) {
 		struct strbuf out = STRBUF_INIT;
@@ -553,7 +742,7 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 		message = out.buf;
 	}
 
-	return do_push_stash(prefix, message, keep_index, NULL);
+	return do_push_stash(prefix, message, keep_index, include_untracked, patch, NULL);
 }
 
 static int do_apply_stash(const char *prefix, const char *commit, int index)
@@ -625,6 +814,43 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 			argv_array_push(&args, "reset");
 			cmd_reset(args.argc, args.argv, prefix);
 		}
+	}
+
+	if (info.has_u) {
+		/*		struct object_id orig_tree;
+		//struct tree *tree;
+
+		discard_cache();
+		read_cache_from(index_path);
+		reset_tree(info.u_tree, 0, 0);
+		//tree = parse_tree_indirect(info.u_tree);
+		//prime_cache_tree(&the_index, tree);
+		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		discard_cache();
+
+		read_cache_from(index_path);
+
+		argv_array_init(&args);
+		cmd_checkout_index(args.argc, args.argv, prefix);
+
+		discard_cache();
+		read_cache();*/
+		struct argv_array args;
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		const char *index_path = ".git/foocache4";
+
+		argv_array_init(&args);
+		argv_array_push(&args, "read-tree");
+		argv_array_push(&args, sha1_to_hex(info.u_tree));
+		argv_array_pushf(&args, "--index-output=%s", index_path);
+		cmd_read_tree(args.argc, args.argv, prefix);
+
+
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "checkout-index");
+		argv_array_push(&cp2.args, "--all");
+		argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", index_path);
+		ret = run_command(&cp2);
 	}
 
 
@@ -934,7 +1160,7 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 		PARSE_OPT_KEEP_UNKNOWN);
 
 	if (argc < 1) {
-		result = do_push_stash(NULL, prefix, 0, NULL);
+		result = do_push_stash(NULL, prefix, 0, 0, 0, NULL);
 	} else if (!strcmp(argv[0], "list"))
 		result = list_stash(argc, argv, prefix);
 	else if (!strcmp(argv[0], "show"))
