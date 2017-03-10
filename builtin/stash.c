@@ -545,7 +545,7 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 
 static int do_apply_stash(const char *prefix, const char *commit, int index)
 {
-	struct object_id h1, h2;
+	struct object_id h1, h2, btree;
 	struct merge_options o;
 	int ret;
 	struct stash_info info;
@@ -555,7 +555,6 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	int bases_count = 1;
 	struct commit *result;
 	const char *me = "git-stash";
-	struct object_id *oid;
 
 	ret = get_stash_info(&info, commit);
 
@@ -564,7 +563,11 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 		return 1;
 	}
 
-	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+	ret = refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
+	if (ret != 0) {
+		printf("invalid2");
+		return ret;
+	}
 
 	ret = write_cache_as_tree(c_tree, 0, NULL);
 	switch (ret) {
@@ -635,13 +638,11 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 		o.verbosity = 0;
 	//}
 
-	oid = xmalloc(sizeof(struct object_id));
-	get_oid(sha1_to_hex(info.b_tree), oid);
-	bases[0] = oid;
-	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
-			discard_cache();
-			read_cache();
+	get_oid(sha1_to_hex(info.b_tree), &btree);
+	bases[0] = &btree;
 
+
+	//printf("%s -- %s %s\n", sha1_to_hex(bases[0]->hash), sha1_to_hex(h1.hash), sha1_to_hex(h2.hash));
 	ret = merge_recursive_generic(&o, &h1, &h2, bases_count, bases, &result);
 	if (ret < 0) {
 
