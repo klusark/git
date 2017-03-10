@@ -331,6 +331,7 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 	struct option options[] = {
 		OPT_STRING('m', "message", &message, N_("message"),
 			 N_("perform 'git stash next'")),
+		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
 		OPT_END()
 	};
 	argc = parse_options(argc, argv, prefix, options,
@@ -540,7 +541,19 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_helper_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
-	return do_push_stash(message, prefix, keep_index, NULL);
+	if (argc != 0) {
+		struct strbuf out = STRBUF_INIT;
+		int i;
+		for (i = 0; i < argc; ++i) {
+			if (i != 0) {
+				strbuf_addf(&out, " ");
+			}
+			strbuf_addf(&out, "%s", argv[i]);
+		}
+		message = out.buf;
+	}
+
+	return do_push_stash(prefix, message, keep_index, NULL);
 }
 
 static int do_apply_stash(const char *prefix, const char *commit, int index)
@@ -644,9 +657,13 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 
 	//printf("%s -- %s %s\n", sha1_to_hex(bases[0]->hash), sha1_to_hex(h1.hash), sha1_to_hex(h2.hash));
 	ret = merge_recursive_generic(&o, &h1, &h2, bases_count, bases, &result);
-	if (ret < 0) {
+	if (ret != 0) {
+		struct argv_array args;
+		argv_array_init(&args);
+		argv_array_push(&args, "rerere");
+		cmd_rerere(args.argc, args.argv, prefix);
 
-		return 128; /* die() error code */
+		return ret;
 	}
 
 	if (index) {

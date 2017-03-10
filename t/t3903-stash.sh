@@ -848,7 +848,7 @@ test_expect_success 'stash with pathspec matching multiple paths' '
        git commit -m "two" file other-file &&
        echo modified >file &&
        echo modified >other-file &&
-       git stash push -- "*file" &&
+       git stash push -- *file &&
        echo original >expect &&
        test_cmp expect file &&
        test_cmp expect other-file &&
