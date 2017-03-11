@@ -602,6 +602,27 @@ static int do_push_stash(const char *prefix, const char *message,
 	int result;
 	struct stash_info info;
 
+	if (patch && include_untracked) {
+		die(_("Can't use --patch and --include-untracked or --all at the same time"));
+	}
+
+	if (!include_untracked) {
+		struct child_process cp = CHILD_PROCESS_INIT;
+		struct strbuf out = STRBUF_INIT;
+
+		cp.git_cmd = 1;
+		argv_array_push(&cp.args, "ls-files");
+		argv_array_push(&cp.args, "--error-unmatch");
+		if (argv) {
+			argv_array_push(&cp.args, "--");
+			argv_array_pushv(&cp.args, argv);
+		}
+		result = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+		if (result != 0) {
+			die("");
+		}
+	}
+
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix, include_untracked, argv)) {
 		printf(_("No local changes to save\n"));
@@ -742,10 +763,6 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 		include_untracked = 2;
 	}
 
-	if (patch && include_untracked) {
-		die(_("Can't use --patch and --include-untracked or --all at the same time"));
-	}
-
 	if (keep_index_set != -1) {
 		keep_index = keep_index_set;
 	} else if (patch) {
@@ -756,7 +773,7 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 		args = argv;
 	}
 
-	return do_push_stash(prefix, message, keep_index, include_untracked, 0, args);
+	return do_push_stash(prefix, message, keep_index, include_untracked, patch, args);
 }
 
 static int save_stash(int argc, const char **argv, const char *prefix)
