@@ -220,8 +220,8 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 
 	if (include_untracked) {
 		struct child_process cp = CHILD_PROCESS_INIT;
+		struct child_process cp2 = CHILD_PROCESS_INIT;
 		struct strbuf out4 = STRBUF_INIT;
-		const char * curr;
 		struct object_id orig_tree;
 		const char *index_path = ".git/foocache1";
 		cp.git_cmd = 1;
@@ -239,14 +239,19 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 
 		discard_cache();
 		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+
+		cp2.git_cmd = 1;
+		argv_array_push(&cp2.args, "update-index");
+		argv_array_push(&cp2.args, "-z");
+		argv_array_push(&cp2.args, "--add");
+		argv_array_push(&cp2.args, "--remove");
+		argv_array_push(&cp2.args, "--stdin");
+		argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", index_path);
+
+		pipe_command(&cp2, out4.buf, out4.len, NULL, 0, NULL, 0);
+
 		discard_cache();
 		ret = read_cache_from(index_path);
-		curr = out4.buf;
-		while (strlen(curr)) {
-			add_file_to_cache(curr, 0);
-			curr = curr + strlen(curr) + 1;
-		}
-
 
 		ret = write_cache_as_tree(u_tree, 0, NULL);
 		strbuf_addf(&out3, "untracked files on %s", out.buf);
@@ -627,6 +632,9 @@ static int do_push_stash(const char *prefix, const char *message,
 			argv_array_push(&args, "--force");
 			argv_array_push(&args, "--quiet");
 			argv_array_push(&args, "-d");
+			if (include_untracked == 2) {
+				argv_array_push(&args, "-x");
+			}
 			cmd_clean(args.argc, args.argv, prefix);
 		}
 
@@ -879,7 +887,7 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 	}
 
 	if (index) {
-		reset_tree(index_tree, 0, 0);
+		ret = reset_tree(index_tree, 0, 0);
 	} else {
 		struct child_process cp = CHILD_PROCESS_INIT;
 		struct child_process cp2 = CHILD_PROCESS_INIT;
@@ -890,15 +898,15 @@ static int do_apply_stash(const char *prefix, const char *commit, int index)
 		argv_array_push(&cp.args, "--name-only");
 		argv_array_push(&cp.args, "--diff-filter=A");
 		argv_array_push(&cp.args, sha1_to_hex(c_tree));
-		pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+		ret = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
-		reset_tree(c_tree, 0, 1);
+		ret = reset_tree(c_tree, 0, 1);
 
 		cp2.git_cmd = 1;
 		argv_array_push(&cp2.args, "update-index");
 		argv_array_push(&cp2.args, "--add");
 		argv_array_push(&cp2.args, "--stdin");
-		pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
+		ret = pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 	}
 
 	if (!quiet) {
