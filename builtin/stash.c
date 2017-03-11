@@ -221,9 +221,11 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 	if (include_untracked) {
 		struct child_process cp = CHILD_PROCESS_INIT;
 		struct child_process cp2 = CHILD_PROCESS_INIT;
+		struct child_process cp3 = CHILD_PROCESS_INIT;
 		struct strbuf out4 = STRBUF_INIT;
 		struct object_id orig_tree;
 		const char *index_path = ".git/foocache1";
+		set_alternate_index_output(index_path);
 		cp.git_cmd = 1;
 		argv_array_push(&cp.args, "ls-files");
 		argv_array_push(&cp.args, "-o");
@@ -237,8 +239,8 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 		}
 		pipe_command(&cp, NULL, 0, &out4, 0, NULL, 0);
 
-		discard_cache();
-		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		//discard_cache();
+		//write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
 
 		cp2.git_cmd = 1;
 		argv_array_push(&cp2.args, "update-index");
@@ -252,14 +254,24 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 
 		discard_cache();
 		ret = read_cache_from(index_path);
+		write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
+		discard_cache();
+		ret = read_cache_from(index_path);
 
 		ret = write_cache_as_tree(u_tree, 0, NULL);
 		strbuf_addf(&out3, "untracked files on %s", out.buf);
 
 		ret = commit_tree(out3.buf, out3.len, u_tree, NULL, u_commit, NULL, NULL);
 
+		set_alternate_index_output(".git/index");
 		discard_cache();
 		read_cache();
+
+		argv_array_push(&cp3.args, "rm");
+		argv_array_push(&cp3.args, "-f");
+		argv_array_push(&cp3.args, index_path);
+		ret = run_command(&cp3);
+
 
 	}
 
@@ -285,7 +297,6 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 		argv_array_push(&args, "HEAD");
 		argv_array_pushf(&args, "--index-output=%s", index_path);
 		cmd_read_tree(args.argc, args.argv, prefix);
-		set_alternate_index_output(".git/index");
 		//write_index_as_tree(orig_tree.hash, &the_index, index_path, 0, NULL);
 
 
@@ -315,6 +326,7 @@ static int do_create_stash(struct stash_info *stash_info, const char *prefix,
 
 		stash_info->patch = out.buf;
 
+		set_alternate_index_output(".git/index");
 		discard_cache();
 		read_cache();
 
@@ -634,6 +646,10 @@ static int do_push_stash(const char *prefix, const char *message,
 			argv_array_push(&args, "-d");
 			if (include_untracked == 2) {
 				argv_array_push(&args, "-x");
+			}
+			if (argv) {
+				argv_array_push(&args, "--");
+				argv_array_pushv(&args, argv);
 			}
 			cmd_clean(args.argc, args.argv, prefix);
 		}
