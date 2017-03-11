@@ -1085,6 +1085,7 @@ static int show_stash(int argc, const char **argv, const char *prefix)
 static int pop_stash(int argc, const char **argv, const char *prefix)
 {
 	int index = 0;
+	int ret;
 	const char *commit = NULL;
 	struct stash_info info;
 	struct option options[] = {
@@ -1106,9 +1107,12 @@ static int pop_stash(int argc, const char **argv, const char *prefix)
 		return 1;
 	}
 
-	do_apply_stash(prefix, commit, index);
-	do_drop_stash(prefix, commit);
-	return 0;
+	ret = do_apply_stash(prefix, commit, index);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = do_drop_stash(prefix, commit);
+	return ret;
 }
 
 static int branch_stash(int argc, const char **argv, const char *prefix)
