@@ -49,9 +49,8 @@ struct stash_info {
 	const char *patch;
 };
 
-static int check_no_changes(const char *prefix)
+static int check_no_changes(const char *prefix, int include_untracked, const char **argv)
 {
-	return 0;
 	return cmd_diff_index(ARRAY_SIZE(diff_index_args) - 1, diff_index_args, prefix) == 0 &&
 		cmd_diff_files(ARRAY_SIZE(diff_files_args) - 1, diff_files_args, prefix) == 0;
 }
@@ -570,8 +569,8 @@ static int do_push_stash(const char *prefix, const char *message,
 	struct stash_info info;
 
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
-	if (check_no_changes(prefix)) {
-		printf("No local changes to save");
+	if (check_no_changes(prefix, include_untracked, argv)) {
+		printf(_("No local changes to save\n"));
 		return 0;
 	}
 
