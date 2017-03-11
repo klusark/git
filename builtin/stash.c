@@ -21,14 +21,6 @@ static const char * const git_stash_helper_usage[] = {
 	NULL
 };
 
-static const char *diff_index_args[] = {
-	"diff-index", "--quiet", "--cached", "HEAD", "--ignore-submodules", "--", NULL
-};
-
-static const char *diff_files_args[] = {
-	"diff-files", "--quiet", "--ignore-submodules", NULL
-};
-
 static const char *ref_stash = "refs/stash";
 static int quiet = 0;
 static struct lock_file lock_file;
@@ -49,10 +41,52 @@ struct stash_info {
 	const char *patch;
 };
 
+int untracked_files(struct strbuf *out, int include_untracked, const char **argv)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+	cp.git_cmd = 1;
+	argv_array_push(&cp.args, "ls-files");
+	argv_array_push(&cp.args, "-o");
+	argv_array_push(&cp.args, "-z");
+	if (include_untracked != 2) {
+		argv_array_push(&cp.args, "--exclude-standard");
+	}
+	if (argv) {
+		argv_array_push(&cp.args, "--");
+		argv_array_pushv(&cp.args, argv);
+	}
+	return pipe_command(&cp, NULL, 0, out, 0, NULL, 0);
+}
+
 static int check_no_changes(const char *prefix, int include_untracked, const char **argv)
 {
-	return cmd_diff_index(ARRAY_SIZE(diff_index_args) - 1, diff_index_args, prefix) == 0 &&
-		cmd_diff_files(ARRAY_SIZE(diff_files_args) - 1, diff_files_args, prefix) == 0;
+	struct argv_array args1;
+	struct argv_array args2;
+	struct strbuf out = STRBUF_INIT;
+	argv_array_init(&args1);
+	argv_array_push(&args1, "diff-index");
+	argv_array_push(&args1, "--quiet");
+	argv_array_push(&args1, "--cached");
+	argv_array_push(&args1, "HEAD");
+	argv_array_push(&args1, "--ignore-submodules");
+	argv_array_push(&args1, "--");
+	if (argv) {
+		argv_array_pushv(&args1, argv);
+	}
+	argv_array_init(&args2);
+	argv_array_push(&args2, "diff-files");
+	argv_array_push(&args2, "--quiet");
+	argv_array_push(&args2, "--ignore-submodules");
+	if (argv) {
+		argv_array_push(&args2, "--");
+		argv_array_pushv(&args2, argv);
+	}
+	if (include_untracked) {
+		untracked_files(&out, include_untracked, argv);
+	}
+	return cmd_diff_index(args1.argc, args1.argv, prefix) == 0 &&
+			cmd_diff_files(args2.argc, args2.argv, prefix) == 0 &&
+			(!include_untracked || out.len == 0);
 }
 
 static int get_stash_info(struct stash_info *info, const char *commit)
@@ -1162,7 +1196,7 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 	git_config(git_default_config, NULL);
 
 	argc = parse_options(argc, argv, prefix, options, git_stash_helper_usage,
-		PARSE_OPT_KEEP_UNKNOWN);
+		PARSE_OPT_KEEP_UNKNOWN|PARSE_OPT_KEEP_DASHDASH);
 
 	if (argc < 1) {
 		result = do_push_stash(NULL, prefix, 0, 0, 0, NULL);
