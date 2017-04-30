@@ -388,6 +388,7 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	const char *hash;
 	struct strbuf out2 = STRBUF_INIT;
 
+	read_cache_preload(NULL);
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix, include_untracked, argv))
 		return 0;
@@ -573,6 +574,7 @@ static int reset_tree(unsigned char i_tree[20], int update, int reset)
 	struct tree_desc t[MAX_UNPACK_TREES];
 	struct tree *tree;
 
+	read_cache_preload(NULL);
 	if (refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL))
 		return -1;
 
@@ -630,6 +632,7 @@ static int do_push_stash(const char *prefix, const char *message,
 		}
 	}
 
+	read_cache_preload(NULL);
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix, include_untracked, argv)) {
 		printf(_("No local changes to save\n"));
@@ -854,6 +857,7 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 	struct commit *result;
 	int ret;
 
+	read_cache_preload(NULL);
 	if (refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL))
 		return -1;
 
