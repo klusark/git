@@ -111,10 +111,9 @@ int untracked_files(struct strbuf *out, int include_untracked,
 	if (include_untracked != 2) {
 		argv_array_push(&cp.args, "--exclude-standard");
 	}
-	if (argv) {
-		argv_array_push(&cp.args, "--");
+	argv_array_push(&cp.args, "--");
+	if (argv)
 		argv_array_pushv(&cp.args, argv);
-	}
 	return pipe_command(&cp, NULL, 0, out, 0, NULL, 0);
 }
 
@@ -132,17 +131,15 @@ static int check_no_changes(const char *prefix, int include_untracked,
 	argv_array_push(&args1, "HEAD");
 	argv_array_push(&args1, "--ignore-submodules");
 	argv_array_push(&args1, "--");
-	if (argv) {
+	if (argv)
 		argv_array_pushv(&args1, argv);
-	}
 	argv_array_init(&args2);
 	argv_array_push(&args2, "diff-files");
 	argv_array_push(&args2, "--quiet");
 	argv_array_push(&args2, "--ignore-submodules");
-	if (argv) {
-		argv_array_push(&args2, "--");
+	argv_array_push(&args2, "--");
+	if (argv)
 		argv_array_pushv(&args2, argv);
-	}
 	if (include_untracked) {
 		untracked_files(&out, include_untracked, argv);
 	}
@@ -625,10 +622,9 @@ static int do_push_stash(const char *prefix, const char *message,
 		cp.git_cmd = 1;
 		argv_array_push(&cp.args, "ls-files");
 		argv_array_push(&cp.args, "--error-unmatch");
-		if (argv) {
-			argv_array_push(&cp.args, "--");
+		argv_array_push(&cp.args, "--");
+		if (argv)
 			argv_array_pushv(&cp.args, argv);
-		}
 		result = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 		if (result != 0) {
 			die("TODO");
@@ -655,7 +651,7 @@ static int do_push_stash(const char *prefix, const char *message,
 	}
 
 	if (!patch) {
-		if (argv) {
+		if (argv && *argv) {
 			struct argv_array args;
 			struct child_process cp = CHILD_PROCESS_INIT;
 			struct child_process cp2 = CHILD_PROCESS_INIT;
@@ -709,10 +705,9 @@ static int do_push_stash(const char *prefix, const char *message,
 			if (include_untracked == 2) {
 				argv_array_push(&args, "-x");
 			}
-			if (argv) {
-				argv_array_push(&args, "--");
+			argv_array_push(&args, "--");
+			if (argv)
 				argv_array_pushv(&args, argv);
-			}
 			cmd_clean(args.argc, args.argv, prefix);
 		}
 
@@ -768,7 +763,6 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 	int patch = 0;
 	int keep_index_set = -1;
 	int keep_index = 0;
-	const char **args = NULL;
 	struct option options[] = {
 		OPT_BOOL('u', "include-untracked", &include_untracked,
 			 N_("stash untracked filed")),
@@ -797,11 +791,7 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 		keep_index = 1;
 	}
 
-	if (argc != 0) {
-		args = argv;
-	}
-
-	return do_push_stash(prefix, message, keep_index, include_untracked, patch, args);
+	return do_push_stash(prefix, message, keep_index, include_untracked, patch, argv);
 }
 
 static int save_stash(int argc, const char **argv, const char *prefix)
