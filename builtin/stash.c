@@ -717,7 +717,26 @@ static int do_push_stash(const char *prefix, const char *message,
 		}
 
 		if (keep_index) {
-			reset_tree(info.i_tree, 1, 1);
+			struct child_process cp = CHILD_PROCESS_INIT;
+			struct child_process cp2 = CHILD_PROCESS_INIT;
+			struct strbuf out = STRBUF_INIT;
+
+			reset_tree(info.i_tree, 0, 1);
+
+			cp.git_cmd = 1;
+			argv_array_push(&cp.args, "ls-files");
+			argv_array_push(&cp.args, "-z");
+			argv_array_push(&cp.args, "--modified");
+			argv_array_push(&cp.args, "--");
+			argv_array_pushv(&cp.args, argv);
+			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+
+			cp2.git_cmd = 1;
+			argv_array_push(&cp2.args, "checkout-index");
+			argv_array_push(&cp2.args, "-z");
+			argv_array_push(&cp2.args, "--force");
+			argv_array_push(&cp2.args, "--stdin");
+			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 		}
 	} else {
 		struct child_process cp2 = CHILD_PROCESS_INIT;
