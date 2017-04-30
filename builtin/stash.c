@@ -140,9 +140,8 @@ static int check_no_changes(const char *prefix, int include_untracked,
 	argv_array_push(&args2, "--");
 	if (argv)
 		argv_array_pushv(&args2, argv);
-	if (include_untracked) {
+	if (include_untracked)
 		untracked_files(&out, include_untracked, argv);
-	}
 	return cmd_diff_index(args1.argc, args1.argv, prefix) == 0 &&
 			cmd_diff_files(args2.argc, args2.argv, prefix) == 0 &&
 			(!include_untracked || out.len == 0);
@@ -702,9 +701,8 @@ static int do_push_stash(const char *prefix, const char *message,
 			argv_array_push(&args, "--force");
 			argv_array_push(&args, "--quiet");
 			argv_array_push(&args, "-d");
-			if (include_untracked == 2) {
+			if (include_untracked == 2)
 				argv_array_push(&args, "-x");
-			}
 			argv_array_push(&args, "--");
 			if (argv)
 				argv_array_pushv(&args, argv);
