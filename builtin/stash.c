@@ -662,6 +662,7 @@ static int do_push_stash(const char *prefix, const char *message,
 			struct strbuf out = STRBUF_INIT;
 			argv_array_init(&args);
 			argv_array_push(&args, "reset");
+			argv_array_push(&args, "--quiet");
 			argv_array_push(&args, "--");
 			argv_array_pushv(&args, argv);
 			cmd_reset(args.argc, args.argv, prefix);
@@ -694,9 +695,7 @@ static int do_push_stash(const char *prefix, const char *message,
 			argv_array_init(&args);
 			argv_array_push(&args, "reset");
 			argv_array_push(&args, "--hard");
-			if (quiet) {
-				argv_array_push(&args, "--quiet");
-			}
+			argv_array_push(&args, "--quiet");
 			cmd_reset(args.argc, args.argv, prefix);
 		}
 
@@ -732,6 +731,7 @@ static int do_push_stash(const char *prefix, const char *message,
 			struct argv_array args;
 			argv_array_init(&args);
 			argv_array_push(&args, "reset");
+			argv_array_push(&args, "--quiet");
 			cmd_reset(args.argc, args.argv, prefix);
 		}
 	}
