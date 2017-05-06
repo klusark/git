@@ -108,9 +108,8 @@ int untracked_files(struct strbuf *out, int include_untracked,
 	argv_array_push(&cp.args, "ls-files");
 	argv_array_push(&cp.args, "-o");
 	argv_array_push(&cp.args, "-z");
-	if (include_untracked != 2) {
+	if (include_untracked != 2)
 		argv_array_push(&cp.args, "--exclude-standard");
-	}
 	argv_array_push(&cp.args, "--");
 	if (argv)
 		argv_array_pushv(&cp.args, argv);
@@ -391,7 +390,7 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	read_cache_preload(NULL);
 	refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL);
 	if (check_no_changes(prefix, include_untracked, argv))
-		return 0;
+		return 1;
 
 	if (get_sha1_tree("HEAD", info->b_commit.hash))
 		die(_("You do not have the initial commit yet"));
@@ -491,9 +490,8 @@ static int create_stash(int argc, const char **argv, const char *prefix)
 		message = out.buf;
 	}
 
-
 	if (do_create_stash(&info, prefix, message, include_untracked, 0, NULL))
-		return -1;
+		return 0;
 
 	printf("%s\n", sha1_to_hex(info.w_commit.hash));
 	return 0;
