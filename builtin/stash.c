@@ -189,6 +189,10 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 		get_sha1_with_context(b_tree_rev.buf, 0, info->b_tree.hash, &unused) == 0 &&
 		get_sha1_with_context(i_tree_rev.buf, 0, info->i_tree.hash, &unused) == 0);
 
+	if (!ret)
+		die(_("%s is not a valid reference"), REV);
+
+
 	info->has_u = get_sha1_with_context(u_commit_rev.buf, 0, info->u_commit.hash, &unused) == 0 &&
 	get_sha1_with_context(u_tree_rev.buf, 0, info->u_tree.hash, &unused) == 0;
 
@@ -1046,7 +1050,6 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL;
 	struct stash_info info;
-	int ret;
 	struct option options[] = {
 		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
 		OPT_END()
@@ -1059,10 +1062,9 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 		commit = argv[0];
 	}
 
-	ret = get_stash_info(&info, commit);
-	if (ret) {
-		die("invalid");
-	}
+	get_stash_info(&info, commit);
+	if (!info->is_stash_ref)
+		die(_("%s is not a stash reference"), commit);
 
 	return do_drop_stash(prefix, &info);
 }
@@ -1159,9 +1161,9 @@ static int pop_stash(int argc, const char **argv, const char *prefix)
 	}
 
 	get_stash_info(&info, commit);
-	if (!info.is_stash_ref) {
-		return 1;
-	}
+
+	if (!info->is_stash_ref)
+		die(_("%s is not a stash reference"), commit);
 
 	ret = do_apply_stash(prefix, &info, index);
 	if (ret != 0) {
