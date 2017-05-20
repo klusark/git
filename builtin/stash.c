@@ -157,9 +157,13 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	struct strbuf i_tree_rev = STRBUF_INIT;
 	struct strbuf u_tree_rev = STRBUF_INIT;
 	struct strbuf commit_buf = STRBUF_INIT;
+	struct strbuf symbolic = STRBUF_INIT;
+	struct strbuf out = STRBUF_INIT;
 	struct object_context unused;
+	char *str;
 	int ret;
 	const char *REV = commit;
+	struct child_process cp = CHILD_PROCESS_INIT;
 	info->is_stash_ref = 0;
 
 	if (commit == NULL) {
@@ -189,15 +193,29 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 		get_sha1_with_context(b_tree_rev.buf, 0, info->b_tree.hash, &unused) == 0 &&
 		get_sha1_with_context(i_tree_rev.buf, 0, info->i_tree.hash, &unused) == 0);
 
-	if (!ret)
-		die(_("%s is not a valid reference"), REV);
+	if (!ret) {
+		fprintf_ln(stderr, _("%s is not a valid reference"), REV);
+		return 1;
+	}
 
 
 	info->has_u = get_sha1_with_context(u_commit_rev.buf, 0, info->u_commit.hash, &unused) == 0 &&
-	get_sha1_with_context(u_tree_rev.buf, 0, info->u_tree.hash, &unused) == 0;
+		get_sha1_with_context(u_tree_rev.buf, 0, info->u_tree.hash, &unused) == 0;
 
-	// TODO: Properly check for stash refs
-	info->is_stash_ref = REV[4] == '/';
+
+	/* TODO: Improve this logic */
+	strbuf_addf(&symbolic, "%s", REV);
+	str = strstr(symbolic.buf, "@");
+	if (str)
+		str[0] = 0;
+	cp.git_cmd = 1;
+	argv_array_push(&cp.args, "rev-parse");
+	argv_array_push(&cp.args, "--symbolic-full-name");
+	argv_array_pushf(&cp.args, "%s", symbolic.buf);
+	pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
+	out.buf[out.len-1] = 0;
+
+	info->is_stash_ref = strcmp(out.buf, ref_stash) == 0;
 
 	return !ret;
 }
@@ -385,6 +403,7 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	const char *branch_name = NULL;
 	struct commit_list *parents = NULL;
 	struct strbuf out = STRBUF_INIT;
+	struct strbuf out3 = STRBUF_INIT;
 	struct pretty_print_context ctx = {0};
 
 	struct commit *c = NULL;
@@ -418,13 +437,14 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 
 	pretty_print_commit(&ctx, c, &out);
 
+	strbuf_addf(&out3, "index on %s\n", out.buf);
 
 	commit_list_insert(lookup_commit(info->b_commit.hash), &parents);
 
 	if (write_cache_as_tree(info->i_tree.hash, 0, NULL))
 		die(_("git write-tree failed to write a tree"));
 
-	if (commit_tree(out.buf, out.len, info->i_tree.hash, parents, info->i_commit.hash, NULL, NULL))
+	if (commit_tree(out3.buf, out3.len, info->i_tree.hash, parents, info->i_commit.hash, NULL, NULL))
 		die(_("Cannot save the current index state"));
 
 
@@ -451,9 +471,9 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	commit_list_insert(lookup_commit(info->b_commit.hash), &parents);
 
 	if (message != NULL && strlen(message) != 0) {
-		strbuf_addf(&out2, "On %s: %s", branch_name, message);
+		strbuf_addf(&out2, "On %s: %s\n", branch_name, message);
 	} else {
-		strbuf_addf(&out2, "WIP on %s", out.buf);
+		strbuf_addf(&out2, "WIP on %s\n", out.buf);
 	}
 
 	if (commit_tree(out2.buf, out2.len, info->w_tree.hash, parents, info->w_commit.hash, NULL, NULL))
@@ -538,7 +558,9 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 	commit = argv[0];
 
 	if (get_sha1(commit, obj.hash)) {
-		die("%s: not a valid SHA1", commit);
+		fprintf_ln(stderr, _("fatal: %s: not a valid SHA1"), commit);
+		fprintf_ln(stderr, _("Cannot update %s with %s"), ref_stash, commit);
+		return 1;
 	}
 
 	return do_store_stash(prefix, quiet, message, obj);
@@ -615,8 +637,10 @@ static int do_push_stash(const char *prefix, const char *message,
 	int result;
 	struct stash_info info;
 
-	if (patch && include_untracked)
-		die(_("Can't use --patch and --include-untracked or --all at the same time"));
+	if (patch && include_untracked) {
+		fprintf_ln(stderr, _("Can't use --patch and --include-untracked or --all at the same time"));
+		return 1;
+	}
 
 	if (!include_untracked) {
 		struct child_process cp = CHILD_PROCESS_INIT;
@@ -629,9 +653,8 @@ static int do_push_stash(const char *prefix, const char *message,
 		if (argv)
 			argv_array_pushv(&cp.args, argv);
 		result = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
-		if (result != 0) {
-			die("TODO");
-		}
+		if (result)
+			return 1;
 	}
 
 	read_cache_preload(NULL);
@@ -651,7 +674,7 @@ static int do_push_stash(const char *prefix, const char *message,
 	result = do_store_stash(prefix, 1, info.message, info.w_commit);
 
 	if (result == 0 && !quiet) {
-		printf(_("Saved working directory and index state %s\n"), info.message);
+		printf(_("Saved working directory and index state %s"), info.message);
 	}
 
 	if (!patch) {
@@ -687,6 +710,7 @@ static int do_push_stash(const char *prefix, const char *message,
 			argv_array_push(&args, "clean");
 			argv_array_push(&args, "--force");
 			argv_array_push(&args, "-d");
+			argv_array_push(&args, "--quiet");
 			argv_array_push(&args, "--");
 			argv_array_pushv(&args, argv);
 			cmd_clean(args.argc, args.argv, prefix);
@@ -1002,9 +1026,8 @@ static int apply_stash(int argc, const char **argv, const char *prefix)
 	}
 
 	ret = get_stash_info(&info, commit);
-	if (ret) {
-		die("invalid");
-	}
+	if (ret)
+		return ret;
 
 	return do_apply_stash(prefix, &info, index);
 }
@@ -1040,9 +1063,9 @@ static int do_drop_stash(const char *prefix, struct stash_info *info)
 	argv_array_pushf(&cp.args, "%s@{0}", ref_stash);
 	ret = run_command(&cp);
 
-	if (ret != 0) {
+	if (ret)
 		do_clear_stash();
-	}
+
 	return 0;
 }
 
@@ -1050,6 +1073,7 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL;
 	struct stash_info info;
+	int ret;
 	struct option options[] = {
 		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
 		OPT_END()
@@ -1062,9 +1086,14 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 		commit = argv[0];
 	}
 
-	get_stash_info(&info, commit);
-	if (!info->is_stash_ref)
-		die(_("%s is not a stash reference"), commit);
+	ret = get_stash_info(&info, commit);
+	if (ret)
+		return ret;
+
+	if (!info.is_stash_ref) {
+		fprintf_ln(stderr, _("'%s' is not a stash reference"), commit);
+		return 1;
+	}
 
 	return do_drop_stash(prefix, &info);
 }
@@ -1123,9 +1152,9 @@ static int show_stash(int argc, const char **argv, const char *prefix)
 		commit = argv[0];
 	}
 	ret = get_stash_info(&info, commit);
-	if (ret) {
-		die("invalid");
-	}
+	if (ret)
+		return ret;
+
 	argv_array_init(&args);
 	argv_array_push(&args, "diff");
 	if (numstat) {
@@ -1160,15 +1189,19 @@ static int pop_stash(int argc, const char **argv, const char *prefix)
 		commit = argv[0];
 	}
 
-	get_stash_info(&info, commit);
+	ret = get_stash_info(&info, commit);
+	if (ret)
+		return ret;
 
-	if (!info->is_stash_ref)
-		die(_("%s is not a stash reference"), commit);
+	if (!info.is_stash_ref) {
+		fprintf_ln(stderr, _("'%s' is not a stash reference"), commit);
+		return 1;
+	}
 
 	ret = do_apply_stash(prefix, &info, index);
-	if (ret != 0) {
+	if (ret)
 		return ret;
-	}
+
 	ret = do_drop_stash(prefix, &info);
 	return ret;
 }
@@ -1194,9 +1227,8 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 	}
 
 	ret = get_stash_info(&info, commit);
-	if (ret) {
+	if (ret)
 		return ret;
-	}
 
 	argv_array_init(&args);
 	argv_array_push(&args, "checkout");
@@ -1258,7 +1290,8 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 			argv_array_pushv(&args, argv);
 			result = push_stash(args.argc, args.argv, prefix);
 			if (result == 0) {
-				printf(_("To restore them type \"git stash apply\"\n"));
+			// TODO: Isn't this needed?
+			// printf_ln(_("To restore them type \"git stash apply\""));
 			}
 		} else {
 			error(_("Unknown subcommand: %s"), argv[0]);
