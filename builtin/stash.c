@@ -420,8 +420,8 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 
 	branch_path = resolve_refdup("HEAD", 0, curr_head.hash, NULL);
 
-	if (branch_path == NULL) {
-		branch_name = "(no_branch)";
+	if (branch_path == NULL || strcmp(branch_path, "HEAD") == 0) {
+		branch_name = "(no branch)";
 	} else {
 		skip_prefix(branch_path, "refs/heads/", &branch_name);
 	}
