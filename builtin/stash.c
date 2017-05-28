@@ -106,9 +106,7 @@ int untracked_files(struct strbuf *out, int include_untracked,
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
 	cp.git_cmd = 1;
-	argv_array_push(&cp.args, "ls-files");
-	argv_array_push(&cp.args, "-o");
-	argv_array_push(&cp.args, "-z");
+	argv_array_pushl(&cp.args, "ls-files", "-o", "-z", NULL);
 	if (include_untracked != 2)
 		argv_array_push(&cp.args, "--exclude-standard");
 	argv_array_push(&cp.args, "--");
@@ -125,19 +123,14 @@ static int check_no_changes(const char *prefix, int include_untracked,
 	struct strbuf out = STRBUF_INIT;
 
 	argv_array_init(&args1);
-	argv_array_push(&args1, "diff-index");
-	argv_array_push(&args1, "--quiet");
-	argv_array_push(&args1, "--cached");
-	argv_array_push(&args1, "HEAD");
-	argv_array_push(&args1, "--ignore-submodules");
-	argv_array_push(&args1, "--");
+	argv_array_pushl(&args1, "diff-index", "--quiet", "--cached", "HEAD",
+		"--ignore-submodules", "--", NULL);
 	if (argv)
 		argv_array_pushv(&args1, argv);
+
 	argv_array_init(&args2);
-	argv_array_push(&args2, "diff-files");
-	argv_array_push(&args2, "--quiet");
-	argv_array_push(&args2, "--ignore-submodules");
-	argv_array_push(&args2, "--");
+	argv_array_pushl(&args2, "diff-files", "--quiet", "--ignore-submodules",
+		"--", NULL);
 	if (argv)
 		argv_array_pushv(&args2, argv);
 	if (include_untracked)
@@ -210,8 +203,7 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	if (str)
 		str[0] = 0;
 	cp.git_cmd = 1;
-	argv_array_push(&cp.args, "rev-parse");
-	argv_array_push(&cp.args, "--symbolic-full-name");
+	argv_array_pushl(&cp.args, "rev-parse", "--symbolic-full-name", NULL);
 	argv_array_pushf(&cp.args, "%s", symbolic.buf);
 	pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 	out.buf[out.len-1] = 0;
@@ -252,11 +244,8 @@ static int save_untracked(struct stash_info *info, struct strbuf *out,
 	untracked_files(&out4, include_untracked, argv);
 
 	cp2.git_cmd = 1;
-	argv_array_push(&cp2.args, "update-index");
-	argv_array_push(&cp2.args, "-z");
-	argv_array_push(&cp2.args, "--add");
-	argv_array_push(&cp2.args, "--remove");
-	argv_array_push(&cp2.args, "--stdin");
+	argv_array_pushl(&cp2.args, "update-index", "-z", "--add", "--remove",
+		"--stdin", NULL);
 	argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", stash_index_path);
 
 	if (pipe_command(&cp2, out4.buf, out4.len, NULL, 0, NULL, 0))
@@ -350,15 +339,12 @@ static int patch_working_tree(struct stash_info *info, const char *prefix,
 	struct strbuf out = STRBUF_INIT;
 
 	argv_array_init(&args);
-	argv_array_push(&args, "read-tree");
-	argv_array_push(&args, "HEAD");
+	argv_array_pushl(&args, "read-tree", "HEAD", NULL);
 	argv_array_pushf(&args, "--index-output=%s", stash_index_path);
 	cmd_read_tree(args.argc, args.argv, prefix);
 
 	cp2.git_cmd = 1;
-	argv_array_push(&cp2.args, "add--interactive");
-	argv_array_push(&cp2.args, "--patch=stash");
-	argv_array_push(&cp2.args, "--");
+	argv_array_pushl(&cp2.args, "add--interactive", "--patch=stash", "--", NULL);
 	argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", stash_index_path);
 	if (run_command(&cp2))
 		return 1;
@@ -370,9 +356,7 @@ static int patch_working_tree(struct stash_info *info, const char *prefix,
 		return 1;
 
 	cp.git_cmd = 1;
-	argv_array_push(&cp.args, "diff-tree");
-	argv_array_push(&cp.args, "-p");
-	argv_array_push(&cp.args, "HEAD");
+	argv_array_pushl(&cp.args, "diff-tree", "-p", "HEAD", NULL);
 	argv_array_push(&cp.args, sha1_to_hex(info->w_tree.hash));
 	argv_array_push(&cp.args, "--");
 	if (pipe_command(&cp, NULL, 0, &out, 0, NULL, 0) || out.len == 0)
@@ -636,9 +620,7 @@ static int do_push_stash(const char *prefix, const char *message,
 		struct strbuf out = STRBUF_INIT;
 
 		cp.git_cmd = 1;
-		argv_array_push(&cp.args, "ls-files");
-		argv_array_push(&cp.args, "--error-unmatch");
-		argv_array_push(&cp.args, "--");
+		argv_array_pushl(&cp.args, "ls-files", "--error-unmatch", "--", NULL);
 		if (argv)
 			argv_array_pushv(&cp.args, argv);
 		result = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
@@ -673,52 +655,38 @@ static int do_push_stash(const char *prefix, const char *message,
 			struct child_process cp2 = CHILD_PROCESS_INIT;
 			struct strbuf out = STRBUF_INIT;
 			argv_array_init(&args);
-			argv_array_push(&args, "reset");
-			argv_array_push(&args, "--quiet");
-			argv_array_push(&args, "--");
+			argv_array_pushl(&args, "reset", "--quiet", "--", NULL);
 			argv_array_pushv(&args, argv);
 			cmd_reset(args.argc, args.argv, prefix);
 
 
 			cp.git_cmd = 1;
-			argv_array_push(&cp.args, "ls-files");
-			argv_array_push(&cp.args, "-z");
-			argv_array_push(&cp.args, "--modified");
-			argv_array_push(&cp.args, "--");
+			argv_array_pushl(&cp.args, "ls-files", "-z", "--modified", "--",
+				NULL);
 			argv_array_pushv(&cp.args, argv);
 			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
 			cp2.git_cmd = 1;
-			argv_array_push(&cp2.args, "checkout-index");
-			argv_array_push(&cp2.args, "-z");
-			argv_array_push(&cp2.args, "--force");
-			argv_array_push(&cp2.args, "--stdin");
+			argv_array_pushl(&cp2.args, "checkout-index", "-z", "--force",
+				"--stdin", NULL);
 			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
 			argv_array_init(&args);
-			argv_array_push(&args, "clean");
-			argv_array_push(&args, "--force");
-			argv_array_push(&args, "-d");
-			argv_array_push(&args, "--quiet");
-			argv_array_push(&args, "--");
+			argv_array_pushl(&args, "clean", "--force", "-d", "--quiet", "--",
+				NULL);
 			argv_array_pushv(&args, argv);
 			cmd_clean(args.argc, args.argv, prefix);
 		} else {
 			struct argv_array args;
 			argv_array_init(&args);
-			argv_array_push(&args, "reset");
-			argv_array_push(&args, "--hard");
-			argv_array_push(&args, "--quiet");
+			argv_array_pushl(&args, "reset", "--hard", "--quiet", NULL);
 			cmd_reset(args.argc, args.argv, prefix);
 		}
 
 		if (include_untracked) {
 			struct argv_array args;
 			argv_array_init(&args);
-			argv_array_push(&args, "clean");
-			argv_array_push(&args, "--force");
-			argv_array_push(&args, "--quiet");
-			argv_array_push(&args, "-d");
+			argv_array_pushl(&args, "clean", "--force", "--quiet", "-d", NULL);
 			if (include_untracked == 2)
 				argv_array_push(&args, "-x");
 			argv_array_push(&args, "--");
@@ -735,18 +703,14 @@ static int do_push_stash(const char *prefix, const char *message,
 			reset_tree(info.i_tree, 0, 1);
 
 			cp.git_cmd = 1;
-			argv_array_push(&cp.args, "ls-files");
-			argv_array_push(&cp.args, "-z");
-			argv_array_push(&cp.args, "--modified");
-			argv_array_push(&cp.args, "--");
+			argv_array_pushl(&cp.args, "ls-files", "-z", "--modified", "--",
+				NULL);
 			argv_array_pushv(&cp.args, argv);
 			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
 			cp2.git_cmd = 1;
-			argv_array_push(&cp2.args, "checkout-index");
-			argv_array_push(&cp2.args, "-z");
-			argv_array_push(&cp2.args, "--force");
-			argv_array_push(&cp2.args, "--stdin");
+			argv_array_push(&cp2.args, "checkout-index", "-z", "--force",
+				"--stdin", NULL);
 			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 		}
 	} else {
