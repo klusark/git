@@ -466,7 +466,8 @@ finish:
 	if (active_cache_changed) {
 		if (write_locked_index(&the_index, &lock_file, COMMIT_LOCK))
 			die(_("Unable to write new index file"));
-	}
+	} else
+		rollback_lock_file(&lock_file);
 
 	return exit_status;
 }
