@@ -449,7 +449,7 @@ test_expect_success 'stash create - no changes' '
 	test_when_finished "git reset --hard HEAD" &&
 	git reset --hard &&
 	git stash create > actual &&
-	test $(cat actual | wc -l) -eq 0
+	! test -s actual
 '
 
 test_expect_success 'stash branch - no stashes on stack, stash-like argument' '
