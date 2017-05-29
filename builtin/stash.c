@@ -118,23 +118,23 @@ int untracked_files(struct strbuf *out, int include_untracked,
 static int check_no_changes(const char *prefix, int include_untracked,
 		const char **argv)
 {
-	struct argv_array args1;
-	struct argv_array args2;
+	struct argv_array args1 = ARGV_ARRAY_INIT;
+	struct argv_array args2 = ARGV_ARRAY_INIT;
 	struct strbuf out = STRBUF_INIT;
 
-	argv_array_init(&args1);
 	argv_array_pushl(&args1, "diff-index", "--quiet", "--cached", "HEAD",
 		"--ignore-submodules", "--", NULL);
 	if (argv)
 		argv_array_pushv(&args1, argv);
 
-	argv_array_init(&args2);
 	argv_array_pushl(&args2, "diff-files", "--quiet", "--ignore-submodules",
 		"--", NULL);
 	if (argv)
 		argv_array_pushv(&args2, argv);
+
 	if (include_untracked)
 		untracked_files(&out, include_untracked, argv);
+
 	return cmd_diff_index(args1.argc, args1.argv, prefix) == 0 &&
 			cmd_diff_files(args2.argc, args2.argv, prefix) == 0 &&
 			(!include_untracked || out.len == 0);
@@ -154,9 +154,9 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	struct strbuf symbolic = STRBUF_INIT;
 	struct strbuf out = STRBUF_INIT;
 	struct object_context unused;
-	char *str;
 	int ret;
 	const char *REV = commit;
+	char *end_of_rev;
 	struct child_process cp = CHILD_PROCESS_INIT;
 	info->is_stash_ref = 0;
 
@@ -178,7 +178,6 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 	strbuf_addf(&i_tree_rev, "%s^2:", REV);
 	strbuf_addf(&u_tree_rev, "%s^3:", REV);
 
-
 	ret = (
 		get_sha1_with_context(w_commit_rev.buf, 0, info->w_commit.hash, &unused) == 0 &&
 		get_sha1_with_context(b_commit_rev.buf, 0, info->b_commit.hash, &unused) == 0 &&
@@ -192,23 +191,18 @@ static int get_stash_info(struct stash_info *info, const char *commit)
 		return 1;
 	}
 
-
 	info->has_u = get_sha1_with_context(u_commit_rev.buf, 0, info->u_commit.hash, &unused) == 0 &&
 		get_sha1_with_context(u_tree_rev.buf, 0, info->u_tree.hash, &unused) == 0;
 
-
-	/* TODO: Improve this logic */
-	strbuf_addf(&symbolic, "%s", REV);
-	str = strstr(symbolic.buf, "@");
-	if (str)
-		str[0] = 0;
+	end_of_rev = strchrnul(REV, '@');
+	strbuf_add(&symbolic, REV, end_of_rev - REV);
 	cp.git_cmd = 1;
 	argv_array_pushl(&cp.args, "rev-parse", "--symbolic-full-name", NULL);
 	argv_array_pushf(&cp.args, "%s", symbolic.buf);
 	pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
-	out.buf[out.len-1] = 0;
 
-	info->is_stash_ref = strcmp(out.buf, ref_stash) == 0;
+	if (out.len-1 == strlen(ref_stash))
+		info->is_stash_ref = strncmp(out.buf, ref_stash, out.len-1) == 0;
 
 	return !ret;
 }
@@ -229,7 +223,8 @@ static void stash_create_callback(struct diff_queue_struct *q,
 	}
 }
 
-/* Untracked files are stored by themselves in a parentless commit, for
+/*
+ * Untracked files are stored by themselves in a parentless commit, for
  * ease of unpacking later.
  */
 static int save_untracked(struct stash_info *info, struct strbuf *out,
@@ -254,7 +249,7 @@ static int save_untracked(struct stash_info *info, struct strbuf *out,
 	discard_cache();
 	read_cache_from(stash_index_path);
 
-	write_index_as_tree(orig_tree.hash, &the_index, stash_index_path, 0, NULL);
+	write_index_as_tree(orig_tree.hash, &the_index, stash_index_path, 0,NULL);
 	discard_cache();
 
 	read_cache_from(stash_index_path);
@@ -332,13 +327,11 @@ static int save_working_tree(struct stash_info *info, const char *prefix,
 static int patch_working_tree(struct stash_info *info, const char *prefix,
 		const char **argv)
 {
-	const char *stash_index_path = ".git/foocache2";
-	struct argv_array args;
+	struct argv_array args = ARGV_ARRAY_INIT;
 	struct child_process cp = CHILD_PROCESS_INIT;
 	struct child_process cp2 = CHILD_PROCESS_INIT;
 	struct strbuf out = STRBUF_INIT;
 
-	argv_array_init(&args);
 	argv_array_pushl(&args, "read-tree", "HEAD", NULL);
 	argv_array_pushf(&args, "--index-output=%s", stash_index_path);
 	cmd_read_tree(args.argc, args.argv, prefix);
@@ -422,12 +415,10 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	if (commit_tree(out3.buf, out3.len, info->i_tree.hash, parents, info->i_commit.hash, NULL, NULL))
 		die(_("Cannot save the current index state"));
 
-
 	if (include_untracked) {
 		if (save_untracked(info, &out, include_untracked, argv))
 			die(_("Cannot save the untracked files"));
 	}
-
 
 	if (patch) {
 		if (patch_working_tree(info, prefix, argv))
@@ -438,9 +429,8 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	}
 	parents = NULL;
 
-	if (include_untracked) {
+	if (include_untracked)
 		commit_list_insert(lookup_commit(info->u_commit.hash), &parents);
-	}
 
 	commit_list_insert(lookup_commit(info->i_commit.hash), &parents);
 	commit_list_insert(lookup_commit(info->b_commit.hash), &parents);
@@ -510,7 +500,7 @@ static int do_store_stash(const char *prefix, int quiet, const char *message,
 
 static int store_stash(int argc, const char **argv, const char *prefix)
 {
-	const char *message = NULL;
+	const char *message = "Create via \"git stash store\".";
 	const char *commit = NULL;
 	struct object_id obj;
 	struct option options[] = {
@@ -521,9 +511,6 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 	};
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_store_usage, 0);
-
-	if (message == NULL)
-		message = "Create via \"git stash store\".";
 
 	if (argc != 1)
 		die(_("\"git stash store\" requires one <commit> argument"));
@@ -640,25 +627,22 @@ static int do_push_stash(const char *prefix, const char *message,
 			die(_("Cannot initialize stash"));
 	}
 
-
 	do_create_stash(&info, prefix, message, include_untracked, patch, argv);
 	result = do_store_stash(prefix, 1, info.message, info.w_commit);
 
-	if (result == 0 && !quiet) {
+	if (result == 0 && !quiet)
 		printf(_("Saved working directory and index state %s"), info.message);
-	}
 
 	if (!patch) {
 		if (argv && *argv) {
-			struct argv_array args;
+			struct argv_array args = ARGV_ARRAY_INIT;
+			struct argv_array args2 = ARGV_ARRAY_INIT;
 			struct child_process cp = CHILD_PROCESS_INIT;
 			struct child_process cp2 = CHILD_PROCESS_INIT;
 			struct strbuf out = STRBUF_INIT;
-			argv_array_init(&args);
 			argv_array_pushl(&args, "reset", "--quiet", "--", NULL);
 			argv_array_pushv(&args, argv);
 			cmd_reset(args.argc, args.argv, prefix);
-
 
 			cp.git_cmd = 1;
 			argv_array_pushl(&cp.args, "ls-files", "-z", "--modified", "--",
@@ -671,21 +655,18 @@ static int do_push_stash(const char *prefix, const char *message,
 				"--stdin", NULL);
 			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
-			argv_array_init(&args);
-			argv_array_pushl(&args, "clean", "--force", "-d", "--quiet", "--",
+			argv_array_pushl(&args2, "clean", "--force", "-d", "--quiet", "--",
 				NULL);
-			argv_array_pushv(&args, argv);
-			cmd_clean(args.argc, args.argv, prefix);
+			argv_array_pushv(&args2, argv);
+			cmd_clean(args2.argc, args2.argv, prefix);
 		} else {
-			struct argv_array args;
-			argv_array_init(&args);
+			struct argv_array args = ARGV_ARRAY_INIT;
 			argv_array_pushl(&args, "reset", "--hard", "--quiet", NULL);
 			cmd_reset(args.argc, args.argv, prefix);
 		}
 
 		if (include_untracked) {
-			struct argv_array args;
-			argv_array_init(&args);
+			struct argv_array args = ARGV_ARRAY_INIT;
 			argv_array_pushl(&args, "clean", "--force", "--quiet", "-d", NULL);
 			if (include_untracked == 2)
 				argv_array_push(&args, "-x");
@@ -709,24 +690,20 @@ static int do_push_stash(const char *prefix, const char *message,
 			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
 			cp2.git_cmd = 1;
-			argv_array_push(&cp2.args, "checkout-index", "-z", "--force",
+			argv_array_pushl(&cp2.args, "checkout-index", "-z", "--force",
 				"--stdin", NULL);
 			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 		}
 	} else {
 		struct child_process cp2 = CHILD_PROCESS_INIT;
 		cp2.git_cmd = 1;
-		argv_array_push(&cp2.args, "apply");
-		argv_array_push(&cp2.args, "-R");
+		argv_array_pushl(&cp2.args, "apply", "-R", NULL);
 		if (pipe_command(&cp2, info.patch, strlen(info.patch), NULL, 0, NULL, 0))
 			die(_("Cannot remove worktree changes"));
 
 		if (!keep_index) {
-			struct argv_array args;
-			argv_array_init(&args);
-			argv_array_push(&args, "reset");
-			argv_array_push(&args, "--quiet");
-			argv_array_push(&args, "--");
+			struct argv_array args = ARGV_ARRAY_INIT;
+			argv_array_pushl(&args, "reset", "--quiet", "--", NULL);
 			if (argv)
 				argv_array_pushv(&args, argv);
 			cmd_reset(args.argc, args.argv, prefix);
@@ -762,15 +739,13 @@ static int push_stash(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_save_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
-	if (all) {
+	if (all)
 		include_untracked = 2;
-	}
 
-	if (keep_index_set != -1) {
+	if (keep_index_set != -1)
 		keep_index = keep_index_set;
-	} else if (patch) {
+	else if (patch)
 		keep_index = 1;
-	}
 
 	return do_push_stash(prefix, message, keep_index, include_untracked, patch, argv);
 }
@@ -801,23 +776,20 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_save_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
-	if (all) {
+	if (all)
 		include_untracked = 2;
-	}
 
-	if (keep_index_set != -1) {
+	if (keep_index_set != -1)
 		keep_index = keep_index_set;
-	} else if (patch) {
+	else if (patch)
 		keep_index = 1;
-	}
 
 	if (argc != 0) {
 		struct strbuf out = STRBUF_INIT;
 		int i;
 		for (i = 0; i < argc; ++i) {
-			if (i != 0) {
+			if (i != 0)
 				strbuf_addf(&out, " ");
-			}
 			strbuf_addf(&out, "%s", argv[i]);
 		}
 		message = out.buf;
@@ -850,16 +822,14 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 			struct child_process cp = CHILD_PROCESS_INIT;
 			struct child_process cp2 = CHILD_PROCESS_INIT;
 			struct strbuf out = STRBUF_INIT;
-			struct argv_array args;
+			struct argv_array args = ARGV_ARRAY_INIT;
 			cp.git_cmd = 1;
-			argv_array_push(&cp.args, "diff-tree");
-			argv_array_push(&cp.args, "--binary");
+			argv_array_pushl(&cp.args, "diff-tree", "--binary", NULL);
 			argv_array_pushf(&cp.args, "%s^2^..%s^2", sha1_to_hex(info->w_commit.hash), sha1_to_hex(info->w_commit.hash));
 			pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
 			cp2.git_cmd = 1;
-			argv_array_push(&cp2.args, "apply");
-			argv_array_push(&cp2.args, "--cached");
+			argv_array_pushl(&cp2.args, "apply", "--cached", NULL);
 			pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 
 			discard_cache();
@@ -867,25 +837,21 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 			if (write_cache_as_tree(index_tree.hash, 0, NULL))
 				return 1;
 
-			argv_array_init(&args);
 			argv_array_push(&args, "reset");
 			cmd_reset(args.argc, args.argv, prefix);
 		}
 	}
 
 	if (info->has_u) {
-		struct argv_array args;
+		struct argv_array args = ARGV_ARRAY_INIT;
 		struct child_process cp2 = CHILD_PROCESS_INIT;
 
-		argv_array_init(&args);
 		argv_array_push(&args, "read-tree");
 		argv_array_push(&args, sha1_to_hex(info->u_tree.hash));
 		argv_array_pushf(&args, "--index-output=%s", stash_index_path);
 
-
 		cp2.git_cmd = 1;
-		argv_array_push(&cp2.args, "checkout-index");
-		argv_array_push(&cp2.args, "--all");
+		argv_array_pushl(&cp2.args, "checkout-index", "--all", NULL);
 		argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", stash_index_path);
 
 		if (cmd_read_tree(args.argc, args.argv, prefix) ||
@@ -894,7 +860,6 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 		}
 		set_alternate_index_output(".git/index");
 	}
-
 
 	init_merge_options(&o);
 
@@ -914,8 +879,7 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 
 	ret = merge_recursive_generic(&o, &c_tree, &info->w_tree, bases_count, bases, &result);
 	if (ret != 0) {
-		struct argv_array args;
-		argv_array_init(&args);
+		struct argv_array args = ARGV_ARRAY_INIT;
 		argv_array_push(&args, "rerere");
 		cmd_rerere(args.argc, args.argv, prefix);
 
@@ -929,27 +893,21 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 		struct child_process cp2 = CHILD_PROCESS_INIT;
 		struct strbuf out = STRBUF_INIT;
 		cp.git_cmd = 1;
-		argv_array_push(&cp.args, "diff-index");
-		argv_array_push(&cp.args, "--cached");
-		argv_array_push(&cp.args, "--name-only");
-		argv_array_push(&cp.args, "--diff-filter=A");
+		argv_array_pushl(&cp.args, "diff-index", "--cached", "--name-only", "--diff-filter=A", NULL);
 		argv_array_push(&cp.args, sha1_to_hex(c_tree.hash));
 		ret = pipe_command(&cp, NULL, 0, &out, 0, NULL, 0);
 
 		ret = reset_tree(c_tree, 0, 1);
 
 		cp2.git_cmd = 1;
-		argv_array_push(&cp2.args, "update-index");
-		argv_array_push(&cp2.args, "--add");
-		argv_array_push(&cp2.args, "--stdin");
+		argv_array_pushl(&cp2.args, "update-index", "--add", "--stdin", NULL);
 		ret = pipe_command(&cp2, out.buf, out.len, NULL, 0, NULL, 0);
 		discard_cache();
 		read_cache();
 	}
 
 	if (!quiet) {
-		struct argv_array args;
-		argv_array_init(&args);
+		struct argv_array args = ARGV_ARRAY_INIT;
 		argv_array_push(&args, "status");
 		cmd_status(args.argc, args.argv, prefix);
 	}
@@ -984,15 +942,11 @@ static int apply_stash(int argc, const char **argv, const char *prefix)
 
 static int do_drop_stash(const char *prefix, struct stash_info *info)
 {
-	struct argv_array args;
+	struct argv_array args = ARGV_ARRAY_INIT;
 	int ret;
 	struct child_process cp = CHILD_PROCESS_INIT;
 
-	argv_array_init(&args);
-	argv_array_push(&args, "reflog");
-	argv_array_push(&args, "delete");
-	argv_array_push(&args, "--updateref");
-	argv_array_push(&args, "--rewrite");
+	argv_array_pushl(&args, "reflog", "delete", "--updateref", "--rewrite", NULL);
 	argv_array_push(&args, info->REV);
 	ret = cmd_reflog(args.argc, args.argv, prefix);
 	if (ret == 0) {
@@ -1006,10 +960,7 @@ static int do_drop_stash(const char *prefix, struct stash_info *info)
 	cp.git_cmd = 1;
 	/* Even though --quiet is specified, rev-parse still outputs the hash */
 	cp.no_stdout = 1;
-	argv_array_init(&cp.args);
-	argv_array_push(&cp.args, "rev-parse");
-	argv_array_push(&cp.args, "--verify");
-	argv_array_push(&cp.args, "--quiet");
+	argv_array_pushl(&cp.args, "rev-parse", "--verify", "--quiet", NULL);
 	argv_array_pushf(&cp.args, "%s@{0}", ref_stash);
 	ret = run_command(&cp);
 
@@ -1054,7 +1005,7 @@ static int list_stash(int argc, const char **argv, const char *prefix)
 
 	struct object_id obj;
 	struct object_context unused;
-	struct argv_array args;
+	struct argv_array args = ARGV_ARRAY_INIT;
 
 	argc = parse_options(argc, argv, prefix, options,
 				 git_stash_list_usage, PARSE_OPT_KEEP_UNKNOWN);
@@ -1062,12 +1013,7 @@ static int list_stash(int argc, const char **argv, const char *prefix)
 	if (get_sha1_with_context(ref_stash, 0, obj.hash, &unused))
 		return 0;
 
-	argv_array_init(&args);
-	argv_array_push(&args, "log");
-	argv_array_push(&args, "--format=%gd: %gs");
-	argv_array_push(&args, "-g");
-	argv_array_push(&args, "--first-parent");
-	argv_array_push(&args, "-m");
+	argv_array_pushl(&args, "log", "--format=%gd: %gs", "-g", "--first-parent", "-m", NULL);
 	argv_array_pushv(&args, argv);
 	argv_array_push(&args, ref_stash);
 	if (cmd_log(args.argc, args.argv, prefix))
@@ -1078,7 +1024,7 @@ static int list_stash(int argc, const char **argv, const char *prefix)
 
 static int show_stash(int argc, const char **argv, const char *prefix)
 {
-	struct argv_array args;
+	struct argv_array args = ARGV_ARRAY_INIT;
 	struct stash_info info;
 	const char *commit = NULL;
 	int numstat = 0;
@@ -1102,7 +1048,6 @@ static int show_stash(int argc, const char **argv, const char *prefix)
 	if (get_stash_info(&info, commit))
 		return 1;
 
-	argv_array_init(&args);
 	argv_array_push(&args, "diff");
 	if (numstat) {
 		argv_array_push(&args, "--numstat");
@@ -1152,7 +1097,7 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 {
 	const char *commit = NULL, *branch = NULL;
 	int ret;
-	struct argv_array args;
+	struct argv_array args = ARGV_ARRAY_INIT;
 	struct stash_info info;
 	struct option options[] = {
 		OPT_END()
@@ -1171,9 +1116,7 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 	if (get_stash_info(&info, commit))
 		return 1;
 
-	argv_array_init(&args);
-	argv_array_push(&args, "checkout");
-	argv_array_push(&args, "-b");
+	argv_array_pushl(&args, "checkout", "-b", NULL);
 	argv_array_push(&args, branch);
 	argv_array_push(&args, sha1_to_hex(info.b_commit.hash));
 	ret = cmd_checkout(args.argc, args.argv, prefix);
@@ -1227,8 +1170,7 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 		result = branch_stash(argc, argv, prefix);
 	else {
 		if (argv[0][0] == '-') {
-			struct argv_array args;
-			argv_array_init(&args);
+			struct argv_array args = ARGV_ARRAY_INIT;
 			argv_array_push(&args, "push");
 			argv_array_pushv(&args, argv);
 			result = push_stash(args.argc, args.argv, prefix);
