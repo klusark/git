@@ -279,7 +279,7 @@ static int save_working_tree(struct stash_info *info, const char *prefix,
 	struct object *obj;
 
 	discard_cache();
-	tree = parse_tree_indirect(info->i_tree.hash);
+	tree = parse_tree_indirect(&info->i_tree);
 	prime_cache_tree(&the_index, tree);
 	write_index_as_tree(orig_tree.hash, &the_index, stash_index_path, 0, NULL);
 	discard_cache();
@@ -310,7 +310,7 @@ static int save_working_tree(struct stash_info *info, const char *prefix,
 	parse_pathspec(&rev.prune_data, 0, 0, prefix, argv);
 
 	diff_setup_done(&rev.diffopt);
-	obj = parse_object(info->b_commit.hash);
+	obj = parse_object(&info->b_commit);
 	add_pending_object(&rev, obj, "");
 	if (run_diff_index(&rev, 0))
 		return 1;
@@ -394,7 +394,7 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	else
 		skip_prefix(branch_path, "refs/heads/", &branch_name);
 
-	c = lookup_commit(info->b_commit.hash);
+	c = lookup_commit(&info->b_commit);
 
 	ctx.output_encoding = get_log_output_encoding();
 	ctx.abbrev = 1;
@@ -407,7 +407,7 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 
 	strbuf_addf(&out3, "index on %s\n", out.buf);
 
-	commit_list_insert(lookup_commit(info->b_commit.hash), &parents);
+	commit_list_insert(lookup_commit(&info->b_commit), &parents);
 
 	if (write_cache_as_tree(info->i_tree.hash, 0, NULL))
 		die(_("git write-tree failed to write a tree"));
@@ -430,10 +430,10 @@ static int do_create_stash(struct stash_info *info, const char *prefix,
 	parents = NULL;
 
 	if (include_untracked)
-		commit_list_insert(lookup_commit(info->u_commit.hash), &parents);
+		commit_list_insert(lookup_commit(&info->u_commit), &parents);
 
-	commit_list_insert(lookup_commit(info->i_commit.hash), &parents);
-	commit_list_insert(lookup_commit(info->b_commit.hash), &parents);
+	commit_list_insert(lookup_commit(&info->i_commit), &parents);
+	commit_list_insert(lookup_commit(&info->b_commit), &parents);
 
 	if (message != NULL && strlen(message) != 0)
 		strbuf_addf(&out2, "On %s: %s\n", branch_name, message);
@@ -566,7 +566,7 @@ static int reset_tree(struct object_id i_tree, int update, int reset)
 
 	memset(&opts, 0, sizeof(opts));
 
-	tree = parse_tree_indirect(i_tree.hash);
+	tree = parse_tree_indirect(&i_tree);
 	if (parse_tree(tree))
 		return 1;
 
