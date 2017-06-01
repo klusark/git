@@ -448,7 +448,7 @@ test_expect_success 'stash create - no changes' '
 	git stash clear &&
 	test_when_finished "git reset --hard HEAD" &&
 	git reset --hard &&
-	git stash create > actual &&
+       git stash create >actual &&
 	! test -s actual
 '
 
