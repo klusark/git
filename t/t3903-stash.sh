@@ -448,8 +448,8 @@ test_expect_success 'stash create - no changes' '
 	git stash clear &&
 	test_when_finished "git reset --hard HEAD" &&
 	git reset --hard &&
-       git stash create >actual &&
-	! test -s actual
+	git stash create >actual &&
+	test_must_be_empty actual
 '
 
 test_expect_success 'stash branch - no stashes on stack, stash-like argument' '
@@ -656,6 +656,20 @@ test_expect_success 'stash branch should not drop the stash if the branch exists
 	git rev-parse stash@{0} --
 '
 
+test_expect_success 'stash branch should not drop the stash if the apply fails' '
+	git stash clear &&
+	git reset HEAD~1 --hard &&
+	echo foo >file &&
+	git add file &&
+	git commit -m initial &&
+	echo bar >file &&
+	git stash &&
+	echo baz >file &&
+	test_when_finished "git checkout master" &&
+	test_must_fail git stash branch new_branch stash@{0} &&
+	git rev-parse stash@{0} --
+'
+
 test_expect_success 'stash apply shows status same as git status (relative to current directory)' '
 	git stash clear &&
 	echo 1 >subdir/subfile1 &&
@@ -814,7 +828,8 @@ test_expect_success 'create in a detached state' '
 	>foo &&
 	git add foo &&
 	STASH_ID=$(git stash create) &&
-	echo "WIP on (no branch): 47d5e0e initial" >expect &&
+	HEAD_ID=$(git rev-parse --short HEAD) &&
+	echo "WIP on (no branch): ${HEAD_ID} initial" >expect &&
 	git show --pretty=%s -s ${STASH_ID} >actual &&
 	test_cmp expect actual
 '
