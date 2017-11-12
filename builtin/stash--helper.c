@@ -8,8 +8,9 @@
 #include "merge-recursive.h"
 #include "argv-array.h"
 #include "run-command.h"
+#include "dir.h"
 
-static const char * const git_stash_usage[] = {
+static const char * const git_stash_helper_usage[] = {
 	N_("git stash--helper drop [-q|--quiet] [<stash>]"),
 	N_("git stash--helper pop [--index] [-q|--quiet] [<stash>]"),
 	N_("git stash--helper apply [--index] [-q|--quiet] [<stash>]"),
@@ -18,27 +19,27 @@ static const char * const git_stash_usage[] = {
 	NULL
 };
 
-static const char * const git_stash_drop_usage[] = {
+static const char * const git_stash_helper_drop_usage[] = {
 	N_("git stash--helper drop [-q|--quiet] [<stash>]"),
 	NULL
 };
 
-static const char * const git_stash_pop_usage[] = {
+static const char * const git_stash_helper_pop_usage[] = {
 	N_("git stash--helper pop [--index] [-q|--quiet] [<stash>]"),
 	NULL
 };
 
-static const char * const git_stash_apply_usage[] = {
+static const char * const git_stash_helper_apply_usage[] = {
 	N_("git stash--helper apply [--index] [-q|--quiet] [<stash>]"),
 	NULL
 };
 
-static const char * const git_stash_branch_usage[] = {
+static const char * const git_stash_helper_branch_usage[] = {
 	N_("git stash--helper branch <branchname> [<stash>]"),
 	NULL
 };
 
-static const char * const git_stash_clear_usage[] = {
+static const char * const git_stash_helper_clear_usage[] = {
 	N_("git stash--helper clear"),
 	NULL
 };
@@ -146,7 +147,7 @@ static int clear_stash(int argc, const char **argv, const char *prefix)
 		OPT_END()
 	};
 
-	argc = parse_options(argc, argv, prefix, options, git_stash_clear_usage, PARSE_OPT_STOP_AT_NON_OPTION);
+	argc = parse_options(argc, argv, prefix, options, git_stash_helper_clear_usage, PARSE_OPT_STOP_AT_NON_OPTION);
 
 	if (argc != 0)
 		return error(_("git stash--helper clear with parameters is unimplemented"));
@@ -163,7 +164,7 @@ static int reset_tree(struct object_id i_tree, int update, int reset)
 	struct lock_file lock_file = LOCK_INIT;
 
 	read_cache_preload(NULL);
-	if (refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL))
+	if (refresh_cache(REFRESH_QUIET))
 		return -1;
 
 	hold_locked_index(&lock_file, LOCK_DIE_ON_ERROR);
@@ -204,20 +205,18 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 	int bases_count = 1;
 	struct commit *result;
 	int ret;
+	int has_index = index;
 
 	read_cache_preload(NULL);
-	if (refresh_index(&the_index, REFRESH_QUIET, NULL, NULL, NULL))
+	if (refresh_cache(REFRESH_QUIET))
 		return -1;
 
-	if (write_cache_as_tree(c_tree.hash, 0, NULL))
-		return -1;
-
-	if (reset_tree(c_tree, 0, 0))
-		return -1;
+	if (write_cache_as_tree(c_tree.hash, 0, NULL) || reset_tree(c_tree, 0, 0))
+		return error(_("Cannot apply a stash in the middle of a merge"));
 
 	if (index) {
-		if (!hashcmp(info->b_tree.hash, info->i_tree.hash) || !hashcmp(c_tree.hash, info->i_tree.hash)) {
-			index = 0;
+		if (!oidcmp(&info->b_tree, &info->i_tree) || !oidcmp(&c_tree, &info->i_tree)) {
+			has_index = 0;
 		} else {
 			struct child_process cp = CHILD_PROCESS_INIT;
 			struct strbuf out = STRBUF_INIT;
@@ -246,23 +245,23 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 	}
 
 	if (info->has_u) {
-		struct argv_array args = ARGV_ARRAY_INIT;
 		struct child_process cp = CHILD_PROCESS_INIT;
-		const char *index_file = get_index_file();
-
-		argv_array_push(&args, "read-tree");
-		argv_array_push(&args, sha1_to_hex(info->u_tree.hash));
-		argv_array_pushf(&args, "--index-output=%s", stash_index_path);
+		struct child_process cp2 = CHILD_PROCESS_INIT;
+		int res;
 
 		cp.git_cmd = 1;
-		argv_array_pushl(&cp.args, "checkout-index", "--all", NULL);
+		argv_array_push(&cp.args, "read-tree");
+		argv_array_push(&cp.args, sha1_to_hex(info->u_tree.hash));
 		argv_array_pushf(&cp.env_array, "GIT_INDEX_FILE=%s", stash_index_path);
 
-		if (cmd_read_tree(args.argc, args.argv, prefix) ||
-				run_command(&cp)) {
+		cp2.git_cmd = 1;
+		argv_array_pushl(&cp2.args, "checkout-index", "--all", NULL);
+		argv_array_pushf(&cp2.env_array, "GIT_INDEX_FILE=%s", stash_index_path);
+
+		res = run_command(&cp) || run_command(&cp2);
+		remove_path(stash_index_path);
+		if (res)
 			return error(_("Could not restore untracked files from stash"));
-		}
-		set_alternate_index_output(index_file);
 	}
 
 	init_merge_options(&o);
@@ -293,7 +292,7 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 		return ret;
 	}
 
-	if (index) {
+	if (has_index) {
 		if (reset_tree(index_tree, 0, 0))
 			return -1;
 	} else {
@@ -318,7 +317,6 @@ static int do_apply_stash(const char *prefix, struct stash_info *info, int index
 
 		strbuf_release(&out);
 		discard_cache();
-		read_cache();
 	}
 
 	if (!quiet) {
@@ -343,7 +341,7 @@ static int apply_stash(int argc, const char **argv, const char *prefix)
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
-			git_stash_apply_usage, 0);
+			git_stash_helper_apply_usage, 0);
 
 	if (argc == 1) {
 		commit = argv[0];
@@ -396,7 +394,7 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
-			git_stash_drop_usage, 0);
+			git_stash_helper_drop_usage, 0);
 
 	if (argc == 1)
 		commit = argv[0];
@@ -423,7 +421,7 @@ static int pop_stash(int argc, const char **argv, const char *prefix)
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
-			git_stash_pop_usage, 0);
+			git_stash_helper_pop_usage, 0);
 
 	if (argc == 1)
 		commit = argv[0];
@@ -451,7 +449,7 @@ static int branch_stash(int argc, const char **argv, const char *prefix)
 	};
 
 	argc = parse_options(argc, argv, prefix, options,
-			git_stash_branch_usage, 0);
+			git_stash_helper_branch_usage, 0);
 
 	if (argc != 0) {
 		branch = argv[0];
@@ -488,14 +486,14 @@ int cmd_stash__helper(int argc, const char **argv, const char *prefix)
 
 	git_config(git_default_config, NULL);
 
-	argc = parse_options(argc, argv, prefix, options, git_stash_usage,
+	argc = parse_options(argc, argv, prefix, options, git_stash_helper_usage,
 		PARSE_OPT_KEEP_UNKNOWN|PARSE_OPT_KEEP_DASHDASH);
 
 	index_file = get_index_file();
 	xsnprintf(stash_index_path, PATH_MAX, "%s.stash.%d", index_file, pid);
 
 	if (argc < 1)
-		usage_with_options(git_stash_usage, options);
+		usage_with_options(git_stash_helper_usage, options);
 	else if (!strcmp(argv[0], "apply"))
 		result = apply_stash(argc, argv, prefix);
 	else if (!strcmp(argv[0], "clear"))
@@ -508,7 +506,7 @@ int cmd_stash__helper(int argc, const char **argv, const char *prefix)
 		result = branch_stash(argc, argv, prefix);
 	else {
 		error(_("unknown subcommand: %s"), argv[0]);
-		usage_with_options(git_stash_usage, options);
+		usage_with_options(git_stash_helper_usage, options);
 		result = 1;
 	}
 
