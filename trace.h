@@ -13,7 +13,7 @@ struct trace_key {
 
 #define TRACE_KEY_INIT(name) { "GIT_TRACE_" #name, 0, 0, 0 }
 
-extern void trace_repo_setup(const char *prefix);
+extern void trace_repo_setup(void);
 extern int trace_want(struct trace_key *key);
 extern void trace_disable(struct trace_key *key);
 extern uint64_t getnanotime(void);
