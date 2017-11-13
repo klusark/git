@@ -1339,6 +1339,13 @@ static int git_status_config(const char *k, const char *v, void *cb)
 	return git_diff_ui_config(k, v, NULL);
 }
 
+static int index_output_cb(const struct option *opt, const char *arg,
+				 int unset)
+{
+	read_cache_from(arg);
+	return 0;
+}
+
 int cmd_status(int argc, const char **argv, const char *prefix)
 {
 	static struct wt_status s;
@@ -1369,6 +1376,9 @@ int cmd_status(int argc, const char **argv, const char *prefix)
 		{ OPTION_STRING, 0, "ignore-submodules", &ignore_submodule_arg, N_("when"),
 		  N_("ignore changes to submodules, optional when: all, dirty, untracked. (Default: all)"),
 		  PARSE_OPT_OPTARG, NULL, (intptr_t)"all" },
+		{ OPTION_CALLBACK, 0, "index", NULL, N_("file"),
+		  N_("write resulting index to <file>"),
+		  PARSE_OPT_NONEG, index_output_cb },
 		OPT_COLUMN(0, "column", &s.colopts, N_("list untracked files in columns")),
 		OPT_END(),
 	};

@@ -1620,12 +1620,17 @@ static unsigned long expand_name_field(struct strbuf *name, const char *cp_)
 
 static struct cache_entry *create_from_disk(struct ondisk_cache_entry *ondisk,
 					    unsigned long *ent_size,
-					    struct strbuf *previous_name)
+					    struct strbuf *previous_name,
+						size_t buffer_size)
 {
 	struct cache_entry *ce;
 	size_t len;
 	const char *name;
 	unsigned int flags;
+
+	if (buffer_size < sizeof(struct ondisk_cache_entry))
+		die("Unknown index entry format ");
+
 
 	/* On-disk flags are just 16 bits */
 	flags = get_be16(&ondisk->flags);
@@ -1634,6 +1639,12 @@ static struct cache_entry *create_from_disk(struct ondisk_cache_entry *ondisk,
 	if (flags & CE_EXTENDED) {
 		struct ondisk_cache_entry_extended *ondisk2;
 		int extended_flags;
+
+		if (buffer_size < sizeof(struct ondisk_cache_entry_extended))
+			die("Unknown index entry format ");
+
+		buffer_size -= sizeof(struct ondisk_cache_entry_extended);
+
 		ondisk2 = (struct ondisk_cache_entry_extended *)ondisk;
 		extended_flags = get_be16(&ondisk2->flags2) << 16;
 		/* We do not yet understand any bit out of CE_EXTENDED_FLAGS */
@@ -1641,14 +1652,17 @@ static struct cache_entry *create_from_disk(struct ondisk_cache_entry *ondisk,
 			die("Unknown index entry format %08x", extended_flags);
 		flags |= extended_flags;
 		name = ondisk2->name;
-	}
-	else
+	} else {
 		name = ondisk->name;
+		buffer_size -= sizeof(struct ondisk_cache_entry);
+	}
 
 	if (!previous_name) {
 		/* v3 and earlier */
 		if (len == CE_NAMEMASK)
-			len = strlen(name);
+			len = strnlen(name, buffer_size);
+		if (len >= buffer_size)
+			die("Buffer overrun");
 		ce = cache_entry_from_ondisk(ondisk, flags, name, len);
 
 		*ent_size = ondisk_ce_size(ce);
@@ -1768,6 +1782,8 @@ int do_read_index(struct index_state *istate, const char *path, int must_exist)
 	istate->version = ntohl(hdr->hdr_version);
 	istate->cache_nr = ntohl(hdr->hdr_entries);
 	istate->cache_alloc = alloc_nr(istate->cache_nr);
+	if (istate->cache_alloc < istate->cache_nr)
+		die_errno("unable to map index file");
 	istate->cache = xcalloc(istate->cache_alloc, sizeof(*istate->cache));
 	istate->initialized = 1;
 
@@ -1782,8 +1798,11 @@ int do_read_index(struct index_state *istate, const char *path, int must_exist)
 		struct cache_entry *ce;
 		unsigned long consumed;
 
+		if ((mmap_size - src_offset) < sizeof(struct ondisk_cache_entry))
+			die_errno("out of buffer");
+
 		disk_ce = (struct ondisk_cache_entry *)((char *)mmap + src_offset);
-		ce = create_from_disk(disk_ce, &consumed, previous_name);
+		ce = create_from_disk(disk_ce, &consumed, previous_name, mmap_size - src_offset);
 		set_index_entry(istate, i, ce);
 
 		src_offset += consumed;
