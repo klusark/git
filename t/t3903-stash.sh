@@ -497,6 +497,10 @@ test_expect_success 'stash branch complains with too many refs' '
 	test_must_fail git stash branch stash-branch stash@{1} stash@{2}
 '
 
+test_expect_success 'stash branch complains with no arguments' '
+	test_must_fail git stash branch
+'
+
 test_expect_success 'stash show format defaults to --stat' '
 	git stash clear &&
 	test_when_finished "git reset --hard HEAD" &&
