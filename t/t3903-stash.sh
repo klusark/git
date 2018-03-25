@@ -444,6 +444,36 @@ test_expect_failure 'stash file to directory' '
 	test foo = "$(cat file/file)"
 '
 
+test_expect_success 'giving too many ref agruments does not modify files' '
+	git stash clear &&
+	test_when_finished "git reset --hard HEAD" &&
+	echo foo >file2 &&
+	git stash &&
+	echo bar >file2 &&
+	git stash &&
+	test-chmtime =123456789 file2 &&
+	for type in apply pop "branch stash-branch"
+	do
+		test_must_fail git stash $type stash@{0} stash@{1} 2>err &&
+		test_i18ngrep "Too many" err &&
+		test 123456789 = $(test-chmtime -v +0 file2 | sed 's/[^0-9].*$//') || return 1
+	done
+'
+
+test_expect_success 'giving too many ref agruments to drop does not drop anything' '
+	git stash list > stashlist1 &&
+	test_must_fail git stash drop stash@{0} stash@{1} 2>err &&
+	test_i18ngrep "Too many" err &&
+	git stash list > stashlist2 &&
+	test_cmp stashlist1 stashlist2
+'
+
+test_expect_success 'giving too many ref agruments to show does not show anything' '
+	test_must_fail git stash show stash@{0} stash@{1} 2>err 1>out && # show must not show anything
+	test_i18ngrep "Too many" err &&
+	test_must_be_empty out
+'
+
 test_expect_success 'stash create - no changes' '
 	git stash clear &&
 	test_when_finished "git reset --hard HEAD" &&
@@ -477,6 +507,11 @@ test_expect_success 'stash branch - stashes on stack, stash-like argument' '
 	git stash branch stash-branch ${STASH_ID} &&
 	test_when_finished "git reset --hard HEAD && git checkout master && git branch -D stash-branch" &&
 	test $(git ls-files --modified | wc -l) -eq 1
+'
+
+test_expect_success 'stash branch complains with no arguments' '
+	test_must_fail git stash branch 2>err &&
+	test_i18ngrep "No branch name specified" err
 '
 
 test_expect_success 'stash show format defaults to --stat' '
