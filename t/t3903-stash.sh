@@ -45,6 +45,12 @@ test_expect_success 'applying bogus stash does nothing' '
 	test_cmp expect file
 '
 
+test_expect_success 'applying with too many agruments does nothing' '
+	test_must_fail git stash apply stash@{0} bar &&
+	echo 1 >expect &&
+	test_cmp expect file
+'
+
 test_expect_success 'apply does not need clean working directory' '
 	echo 4 >other-file &&
 	git stash apply &&
@@ -95,6 +101,10 @@ test_expect_success 'unstashing in a subdirectory' '
 
 test_expect_success 'stash drop complains of extra options' '
 	test_must_fail git stash drop --foo
+'
+
+test_expect_success 'stash drop complains with too many refs' '
+	test_must_fail git stash drop stash@{1} stash@{2}
 '
 
 test_expect_success 'drop top stash' '
@@ -158,6 +168,10 @@ test_expect_success 'stash pop' '
 	test 1 = $(git show :file) &&
 	test 1 = $(git show HEAD:file) &&
 	test 0 = $(git stash list | wc -l)
+'
+
+test_expect_success 'stash pop complains with too many refs' '
+	test_must_fail git stash pop stash@{1} stash@{2}
 '
 
 cat > expect << EOF
@@ -479,6 +493,10 @@ test_expect_success 'stash branch - stashes on stack, stash-like argument' '
 	test $(git ls-files --modified | wc -l) -eq 1
 '
 
+test_expect_success 'stash branch complains with too many refs' '
+	test_must_fail git stash branch stash-branch stash@{1} stash@{2}
+'
+
 test_expect_success 'stash show format defaults to --stat' '
 	git stash clear &&
 	test_when_finished "git reset --hard HEAD" &&
@@ -565,6 +583,10 @@ test_expect_success 'stash show -p - no stashes on stack, stash-like argument' '
 	EOF
 	git stash show -p ${STASH_ID} >actual &&
 	test_cmp expected actual
+'
+
+test_expect_success 'stash show complains with too many refs' '
+	test_must_fail git stash show stash@{1} stash@{2}
 '
 
 test_expect_success 'stash drop - fail early if specified stash is not a stash reference' '
