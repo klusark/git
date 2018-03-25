@@ -84,6 +84,17 @@ test_expect_success 'apply stashed changes (including index)' '
 	test 1 = $(git show HEAD:file)
 '
 
+test_expect_success 'giving too many ref agruments does nothing' '
+
+	for type in apply drop pop show "branch stash-branch"
+	do
+		test-chmtime =123456789 file &&
+		test_must_fail git stash $type stash@{0} stash@{1} 2>err &&
+		test_i18ngrep "Too many" err &&
+		test 123456789 = $(test-chmtime -v +0 file | sed 's/[^0-9].*$//') || return 1
+	done
+'
+
 test_expect_success 'unstashing in a subdirectory' '
 	git reset --hard HEAD &&
 	mkdir subdir &&
@@ -477,6 +488,11 @@ test_expect_success 'stash branch - stashes on stack, stash-like argument' '
 	git stash branch stash-branch ${STASH_ID} &&
 	test_when_finished "git reset --hard HEAD && git checkout master && git branch -D stash-branch" &&
 	test $(git ls-files --modified | wc -l) -eq 1
+'
+
+test_expect_success 'stash branch complains with no arguments' '
+	test_must_fail git stash branch 2>err &&
+	test_i18ngrep "No branch name specified" err
 '
 
 test_expect_success 'stash show format defaults to --stat' '
