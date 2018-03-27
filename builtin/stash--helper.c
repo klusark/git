@@ -11,11 +11,17 @@
 #include "dir.h"
 
 static const char * const git_stash_helper_usage[] = {
+	N_("git stash show [<stash>]"),
 	N_("git stash--helper drop [-q|--quiet] [<stash>]"),
 	N_("git stash--helper pop [--index] [-q|--quiet] [<stash>]"),
 	N_("git stash--helper apply [--index] [-q|--quiet] [<stash>]"),
 	N_("git stash--helper branch <branchname> [<stash>]"),
 	N_("git stash--helper clear"),
+	NULL
+};
+
+static const char * const git_stash_show_usage[] = {
+	N_("git stash show [<stash>]"),
 	NULL
 };
 
@@ -519,6 +525,45 @@ static int drop_stash(int argc, const char **argv, const char *prefix)
 	return ret;
 }
 
+static int show_stash(int argc, const char **argv, const char *prefix)
+{
+	struct argv_array args = ARGV_ARRAY_INIT;
+	struct stash_info info;
+	int numstat = 0;
+	int patch = 0;
+	int ret;
+
+	struct option options[] = {
+		OPT_BOOL(0, "numstat", &numstat,
+			N_("Shows number of added and deleted lines in decimal notation")),
+		OPT_BOOL('p', "patch", &patch,
+			N_("Generate patch")),
+		OPT_END()
+	};
+
+	argc = parse_options(argc, argv, prefix, options,
+			git_stash_show_usage, 0);
+
+	if (get_stash_info(&info, argc, argv))
+		return -1;
+
+	argv_array_push(&args, "diff");
+	if (numstat)
+		argv_array_push(&args, "--numstat");
+
+	if (patch)
+		argv_array_push(&args, "-p");
+
+	if (!patch && !numstat)
+		argv_array_push(&args, "--stat");
+
+	argv_array_push(&args, oid_to_hex(&info.b_commit));
+	argv_array_push(&args, oid_to_hex(&info.w_commit));
+	ret = cmd_diff(args.argc, args.argv, prefix);
+	free_stash_info(&info);
+	return ret;
+}
+
 static int pop_stash(int argc, const char **argv, const char *prefix)
 {
 	int index = 0, ret;
@@ -611,6 +656,8 @@ int cmd_stash__helper(int argc, const char **argv, const char *prefix)
 
 	if (argc < 1)
 		usage_with_options(git_stash_helper_usage, options);
+	else if (!strcmp(argv[0], "show"))
+		result = show_stash(argc, argv, prefix);
 	else if (!strcmp(argv[0], "apply"))
 		result = apply_stash(argc, argv, prefix);
 	else if (!strcmp(argv[0], "clear"))
