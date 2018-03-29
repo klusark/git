@@ -398,7 +398,7 @@ clear)
 	;;
 create)
 	shift
-	create_stash -m "$*" && echo "$w_commit"
+	git stash--helper create "$@"
 	;;
 store)
 	shift
