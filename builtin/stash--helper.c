@@ -17,6 +17,7 @@ static const char * const git_stash_helper_usage[] = {
 	N_("git stash--helper apply [--index] [-q|--quiet] [<stash>]"),
 	N_("git stash--helper branch <branchname> [<stash>]"),
 	N_("git stash--helper clear"),
+	N_("git stash store [-m|--message <message>] [-q|--quiet] <commit>"),
 	NULL
 };
 
@@ -47,6 +48,11 @@ static const char * const git_stash_helper_branch_usage[] = {
 
 static const char * const git_stash_helper_clear_usage[] = {
 	N_("git stash--helper clear"),
+	NULL
+};
+
+static const char * const git_stash_store_usage[] = {
+	N_("git stash store [-m|--message <message>] [-q|--quiet] <commit>"),
 	NULL
 };
 
@@ -196,6 +202,46 @@ static int get_stash_info(struct stash_info *info, int argc, const char **argv)
 	strbuf_release(&out);
 
 	return 0;
+}
+
+static int do_store_stash(const char *prefix, int quiet, const char *message,
+		struct object_id commit)
+{
+	int ret;
+	ret = update_ref(message, ref_stash, &commit, NULL,
+			REF_FORCE_CREATE_REFLOG, UPDATE_REFS_DIE_ON_ERR);
+
+	if (ret && !quiet)
+		return error(_("Cannot update %s with %s"), ref_stash, sha1_to_hex(commit.hash));
+
+	return ret;
+}
+
+static int store_stash(int argc, const char **argv, const char *prefix)
+{
+	const char *message = "Create via \"git stash store\".";
+	const char *commit = NULL;
+	struct object_id obj;
+	struct option options[] = {
+		OPT_STRING('m', "message", &message, N_("message"),
+			N_("stash commit message")),
+		OPT__QUIET(&quiet, N_("be quiet, only report errors")),
+		OPT_END()
+	};
+	argc = parse_options(argc, argv, prefix, options, git_stash_store_usage, 0);
+
+	if (argc != 1)
+		return error(_("\"git stash store\" requires one <commit> argument"));
+
+	commit = argv[0];
+
+	if (get_oid(commit, &obj)) {
+		fprintf_ln(stderr, _("fatal: %s: not a valid SHA1"), commit);
+		fprintf_ln(stderr, _("cannot update %s with %s"), ref_stash, commit);
+		return -1;
+	}
+
+	return do_store_stash(prefix, quiet, message, obj);
 }
 
 static int do_clear_stash(void)
@@ -670,6 +716,8 @@ int cmd_stash__helper(int argc, const char **argv, const char *prefix)
 		result = pop_stash(argc, argv, prefix);
 	else if (!strcmp(argv[0], "branch"))
 		result = branch_stash(argc, argv, prefix);
+	else if (!strcmp(argv[0], "store"))
+		result = store_stash(argc, argv, prefix);
 	else {
 		error(_("unknown subcommand: %s"), argv[0]);
 		usage_with_options(git_stash_helper_usage, options);
